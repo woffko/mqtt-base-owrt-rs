@@ -188,6 +188,21 @@ fn entry_json(e: &Entry, cfg: &Config, last: Option<&Value>) -> Value {
     })
 }
 
+/// Template name without placeholders, for metrics that have no instance:
+/// `Wi-Fi {n} Clients` becomes `Wi-Fi Clients`.
+fn template_title(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut rest = name;
+    while let Some(start) = rest.find('{') {
+        out.push_str(&rest[..start]);
+        rest = rest[start..]
+            .find('}')
+            .map_or("", |end| &rest[start + end + 1..]);
+    }
+    out.push_str(rest);
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn catalog_expand(template: &str, e: &Entry) -> String {
     crate::catalog::expand(template, &e.inst)
 }
@@ -240,7 +255,7 @@ pub fn catalog(source: &dyn Source) -> Value {
                 .missing
                 .iter()
                 .filter(|(mg, _, _)| mg == g)
-                .map(|(_, d, r)| json!({ "template": d.id, "name": d.name, "reason": r }))
+                .map(|(_, d, r)| json!({ "template": d.id, "name": template_title(d.name), "reason": r }))
                 .collect();
             json!({
                 "id": g.id(),
@@ -554,6 +569,14 @@ mod tests {
             v["config_topic"],
             "homeassistant/binary_sensor/openwrt_router-primary_wan_wan_status/config"
         );
+    }
+
+    #[test]
+    fn template_titles_drop_placeholders() {
+        assert_eq!(template_title("Wi-Fi {n} Clients"), "Wi-Fi Clients");
+        assert_eq!(template_title("{P} {n} Status"), "Status");
+        assert_eq!(template_title("MWAN3 {n} {m} Latency"), "MWAN3 Latency");
+        assert_eq!(template_title("Uptime"), "Uptime");
     }
 
     #[test]

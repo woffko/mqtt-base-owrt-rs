@@ -65,8 +65,12 @@ fs.mkdirSync(out, { recursive: true, mode: 0o700 });
 			await page.locator('input[name="luci_username"]').fill('root');
 			await page.locator('input[name="luci_password"]').fill(password);
 			await page.locator('button.cbi-button-positive, button:has-text("Log in"), button:has-text("Login")').first().click();
-			await page.waitForLoadState('domcontentloaded');
+			await page.waitForLoadState('networkidle').catch(() => {});
 		}
+		// The login page itself may log errors of the anonymous session
+		// (for example `uci get luci` denied); only errors after login count.
+		report.errors = report.errors.filter((e) => e.kind !== kind);
+		report.console = report.console.filter((e) => e.kind !== kind);
 		for (const name of pages) {
 			await page.goto(base + name, { waitUntil: 'domcontentloaded' });
 			await page.waitForSelector('#view > :not(.spinning)', { timeout: 30000 }).catch(() => {});
@@ -83,6 +87,11 @@ fs.mkdirSync(out, { recursive: true, mode: 0o700 });
 			const file = path.join(out, `${kind}-${name}.png`);
 			await page.screenshot({ path: file, fullPage: true });
 			report.shots.push(path.basename(file));
+			const top = path.join(out, `${kind}-${name}-top.png`);
+			await page.evaluate(() => window.scrollTo(0, 0));
+			await page.waitForTimeout(300);
+			await page.screenshot({ path: top });
+			report.shots.push(path.basename(top));
 		}
 		await context.close();
 	}

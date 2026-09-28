@@ -135,7 +135,7 @@ return view.extend({
 			dom.content(ifaceBox, self.renderChoiceList(ifaceItems, self.select.interfaces, self.select.mode === 'auto'));
 		};
 		drawIfaces();
-		var mode = E('select', { 'class': 'cbi-input-select' }, [
+		var mode = E('select', { 'class': 'cbi-input-select', 'style': 'width:auto;max-width:100%' }, [
 			E('option', { 'value': 'auto' }, [ mm.text(_('Automatic: WAN interfaces (wan*, wwan*), like the legacy script')) ]),
 			E('option', { 'value': 'manual' }, [ mm.text(_('Manual selection')) ])
 		]);

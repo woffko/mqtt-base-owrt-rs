@@ -173,9 +173,20 @@ function formatTime(unix) {
 		p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
 }
 
+function formatBytes(n) {
+	var units = [ 'B', 'KiB', 'MiB', 'GiB', 'TiB' ], i = 0;
+	while (n >= 1024 && i < units.length - 1) {
+		n /= 1024;
+		i++;
+	}
+	return (i ? n.toFixed(1) : String(n)) + ' ' + units[i];
+}
+
 function formatValue(value, unit) {
 	if (value == null || value === '')
 		return '-';
+	if (unit === 'B' && /^[0-9]+$/.test(String(value)) && +value >= 1024)
+		return value + ' B (' + formatBytes(+value) + ')';
 	return unit ? value + ' ' + unit : String(value);
 }
 
@@ -206,5 +217,6 @@ return baseclass.extend({
 	IDENTITY_KEYS: IDENTITY_KEYS,
 	formatDuration: formatDuration,
 	formatTime: formatTime,
-	formatValue: formatValue
+	formatValue: formatValue,
+	formatBytes: formatBytes
 });

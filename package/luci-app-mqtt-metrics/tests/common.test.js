@@ -80,6 +80,9 @@ assert.equal(mm.formatDuration(3700), '1h 1m');
 assert.equal(mm.formatDuration(90000), '1d 1h');
 assert.equal(mm.formatValue('12.5', '%'), '12.5 %');
 assert.equal(mm.formatValue(null, '%'), '-');
+assert.equal(mm.formatValue('647132216', 'B'), '647132216 B (617.2 MiB)');
+assert.equal(mm.formatValue('512', 'B'), '512 B');
+assert.equal(mm.formatBytes(1536), '1.5 KiB');
 
 // Backend text is never passed to E() as a string.
 assert.equal(mm.text('<b>x</b>').nodeValue, '<b>x</b>');

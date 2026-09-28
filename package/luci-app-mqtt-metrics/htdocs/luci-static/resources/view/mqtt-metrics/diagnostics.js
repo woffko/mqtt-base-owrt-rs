@@ -51,7 +51,7 @@ return view.extend({
 
 	renderPreview: function(catalog) {
 		var metrics = (catalog.metrics || []).slice().sort(function(a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
-		var select = E('select', { 'class': 'cbi-input-select' }, metrics.map(function(m) {
+		var select = E('select', { 'class': 'cbi-input-select', 'style': 'width:auto;max-width:100%' }, metrics.map(function(m) {
 			return E('option', { 'value': m.key }, [ mm.text(m.key + (m.publish ? '' : ' (' + _('not published') + ')')) ]);
 		}));
 		var out = E('pre', { 'style': 'white-space:pre-wrap;word-break:break-all;max-height:30em;overflow:auto' });
@@ -103,16 +103,18 @@ return view.extend({
 	},
 
 	renderLog: function(log) {
+		var newestFirst = function(l) { return (l.lines || []).slice().reverse().join('\n'); };
 		var box = E('pre', { 'style': 'white-space:pre-wrap;word-break:break-all;max-height:30em;overflow:auto' },
-			[ mm.text(log.error ? log.error : ((log.lines || []).join('\n') || _('No log lines.'))) ]);
+			[ mm.text(log.error ? log.error : (newestFirst(log) || _('No log lines.'))) ]);
 		return E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, [ mm.text(_('Service log')) ]),
+			E('div', { 'class': 'cbi-section-descr' }, [ mm.text(_('Newest lines first.')) ]),
 			E('button', {
 				'type': 'button',
 				'class': 'cbi-button cbi-button-neutral',
 				'click': ui.createHandlerFn(this, function() {
 					return mm.callLog().then(function(l) {
-						dom.content(box, mm.text(l.error ? l.error : ((l.lines || []).join('\n') || _('No log lines.'))));
+						dom.content(box, mm.text(l.error ? l.error : (newestFirst(l) || _('No log lines.'))));
 					});
 				})
 			}, [ mm.text(_('Refresh')) ]),
