@@ -89,13 +89,17 @@ switch)
 	ssh_ "$HELPERS"'
 	set -e
 	[ -f $BACKUP/MD5SUMS ] || { echo "run the backup step first" >&2; exit 1; }
+	# Stop the legacy script first, so it cannot re-announce the entities
+	# that the daemon removes on its first production pass.
+	remove_cron_line /etc/crontabs/root
+	/etc/init.d/cron restart
+	n=0
+	while pgrep -f publish_metrics.sh >/dev/null && [ $n -lt 60 ]; do sleep 1; n=$((n + 1)); done
 	uci set mqtt-metrics.identity.base_topic="openwrt"
 	uci set mqtt-metrics.identity.discovery="1"
 	for o in discovery_prefix device_id birth_topic node; do uci -q delete mqtt-metrics.identity.$o || true; done
 	uci commit mqtt-metrics
 	/etc/init.d/mqtt-metrics reload
-	remove_cron_line /etc/crontabs/root
-	/etc/init.d/cron restart
 	sleep 10
 	ubus call mqtt-metrics status | jsonfilter -e "@.state" -e "@.device.base_topic" -e "@.owned_topics"
 	grep -c publish_metrics /etc/crontabs/root || true

@@ -79,14 +79,23 @@ ls -l /root/mqtt-metrics-migration
 
 ## 3. Switch over
 
+Stop the legacy script first, so it cannot re-announce the entities that
+the daemon removes on its first production pass:
+
 ```sh
+sed -i '\|/usr/bin/publish_metrics.sh|d' /etc/crontabs/root
+/etc/init.d/cron restart
+while pgrep -f publish_metrics.sh >/dev/null; do sleep 1; done
 uci set mqtt-metrics.identity.base_topic='openwrt'
 uci set mqtt-metrics.identity.discovery='1'
 uci commit mqtt-metrics
 /etc/init.d/mqtt-metrics reload
-sed -i '\|/usr/bin/publish_metrics.sh|d' /etc/crontabs/root
-/etc/init.d/cron restart
 ```
+
+The metric selection and intervals stay as configured. A fresh install
+publishes only the legacy set every 300 s; anything switched on in LuCI
+(for example the recommended set) appears as new entities in Home
+Assistant.
 
 On its first pass with discovery on, the daemon adopts the legacy topics of
 this router: entities that can never have a value are removed, all others

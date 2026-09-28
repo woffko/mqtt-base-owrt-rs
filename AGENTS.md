@@ -86,8 +86,9 @@ it):
   memory, Git, logs, or delegated prompts; use `sshpass -e` with the
   `SSHPASS` environment variable.
 - Broker credentials are copied on the router from
-  `/usr/bin/publish_metrics.sh` into `/etc/config/mqtt-metrics` with a
-  router-side command that never prints them.
+  `/usr/bin/publish_metrics.sh` with `mqtt-metricsd --import-legacy`: host,
+  port and user go to `/etc/config/mqtt-metrics`, the password to
+  `/etc/mqtt-metrics/secret` (ADR-0004). Nothing is printed.
 - Read-only inspection is the default. Installing and removing this project's
   packages on both routers is authorized as part of the Goal. Changes to
   `/etc/rc.local`, `/etc/crontabs/root`, and the cutover from the legacy
