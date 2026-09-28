@@ -86,6 +86,7 @@ tools/check.sh
 - [User guide](docs/USER_GUIDE.md)
 - [Topics and entities](docs/TOPICS.md)
 - [Migration from publish_metrics.sh](docs/MIGRATION.md)
+- [Release notes](docs/RELEASE_NOTES.md)
 - [Work plan](docs/plan/PLAN.md) and [design decisions](docs/decisions/)
 
 ## Licence

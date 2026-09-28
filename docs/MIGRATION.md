@@ -15,6 +15,22 @@ The legacy setup consists of:
 `mqtt-metrics` never edits these files. The LuCI page
 **Services → MQTT Metrics → Diagnostics** shows which parts are present.
 
+## Scripted procedure
+
+`tools/cutover.sh <router> <step>` runs the steps below over SSH (password in
+`SSHPASS`):
+
+| Step | Changes live files | What it does |
+| --- | --- | --- |
+| `sandbox-test` | no | applies the cron and `rc.local` edits and the rollback to copies in `/tmp`, checks syntax and that the rollback is byte-identical |
+| `backup` | no (writes `/root/mqtt-metrics-migration`) | copies `rc.local`, the crontab, the legacy script and the UCI config, with checksums |
+| `switch` | yes | production topics with discovery on, removes the cron line |
+| `rclocal` | yes | removes the installer block from `/etc/rc.local` |
+| `verify` | no | service state, owned topics, leftovers |
+| `rollback` | yes | stops and disables mqtt-metrics, restores crontab, `rc.local` and the script |
+
+The manual commands follow.
+
 ## 1. Install and run in shadow mode
 
 Shadow mode publishes states under a separate prefix and announces nothing
