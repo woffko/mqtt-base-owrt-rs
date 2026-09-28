@@ -59,6 +59,8 @@ struct Session {
     /// Last Will topic registered with the broker for this session.
     availability_topic: String,
     client_id: String,
+    /// Birth topic this session is subscribed to.
+    birth: Option<String>,
 }
 
 /// What a clean disconnect leaves on the session's availability topic.
@@ -165,6 +167,9 @@ impl Daemon {
             (_, Some(_), _) => (true, Farewell::Offline),
             _ => (false, Farewell::Offline),
         };
+        if !reconnect {
+            self.update_birth_subscription();
+        }
         if reconnect {
             self.log
                 .info("broker settings or device identity changed; reconnecting");
@@ -204,14 +209,13 @@ impl Daemon {
         self.set_state("connecting");
         match Client::connect(&opts) {
             Ok(mut client) => {
+                let birth = wanted_birth(cfg);
                 let mut setup = client
                     .publish(&id.availability_topic, b"online", 1, true)
                     .map(|_| ());
                 if setup.is_ok() {
-                    if let Some(birth) = &cfg.identity.birth_topic {
-                        if cfg.identity.discovery {
-                            setup = client.subscribe(birth);
-                        }
+                    if let Some(topic) = &birth {
+                        setup = client.subscribe(topic);
                     }
                 }
                 match setup {
@@ -226,6 +230,7 @@ impl Daemon {
                             broker: cfg.broker.clone(),
                             availability_topic: id.availability_topic.clone(),
                             client_id: id.client_id.clone(),
+                            birth,
                         });
                         self.conn.last_connect = Some(self.now());
                         self.conn.last_error = None;
@@ -239,6 +244,27 @@ impl Daemon {
             }
             Err(e) => self.connect_failed(&e),
         }
+    }
+
+    /// Subscribe to a new birth topic after a reload that kept the session.
+    /// A subscription that is no longer wanted is left in place: `is_birth`
+    /// only accepts the configured topic, and the next reconnect drops it.
+    fn update_birth_subscription(&mut self) {
+        let Ok(cfg) = &self.config else { return };
+        let wanted = wanted_birth(cfg);
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        if wanted == session.birth {
+            return;
+        }
+        if let Some(topic) = &wanted {
+            if let Err(e) = session.client.subscribe(topic) {
+                self.lost(&e);
+                return;
+            }
+        }
+        session.birth = wanted;
     }
 
     fn connect_failed(&mut self, e: &MqttError) {
@@ -365,6 +391,9 @@ impl Daemon {
             match req.command {
                 Command::Reload => {
                     self.reload();
+                    if self.config.is_err() {
+                        self.set_state("config_error");
+                    }
                     match &self.config {
                         Ok(_) => req.reply(true, "configuration reloaded"),
                         Err(e) => req.reply(false, &e.join("; ")),
@@ -444,6 +473,15 @@ impl Daemon {
     }
 }
 
+/// Birth topic to subscribe to: only with discovery on.
+fn wanted_birth(cfg: &Config) -> Option<String> {
+    if cfg.identity.discovery {
+        cfg.identity.birth_topic.clone()
+    } else {
+        None
+    }
+}
+
 pub fn run(level: Option<Level>) -> i32 {
     let mut log = Log::new(level.unwrap_or(Level::Info));
     let signals = match Signals::register() {
@@ -498,6 +536,10 @@ pub fn run(level: Option<Level>) -> i32 {
         if signals.hup.swap(false, Ordering::Relaxed) {
             log.info("SIGHUP: reloading configuration");
             d.reload();
+            if d.config.is_err() {
+                d.set_state("config_error");
+            }
+            d.write_status();
         }
         d.handle_control(server.as_ref());
 
