@@ -1,0 +1,264 @@
+{
+	"interfaces": {
+		"wan": {
+			"age": 0,
+			"online": 28736,
+			"offline": 0,
+			"uptime": 119478,
+			"score": 8,
+			"lost": 0,
+			"turn": 3172,
+			"status": "online",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"check_quality": true,
+			"track_ip": [
+				{
+					"ip": "192.0.2.35",
+					"status": "up",
+					"latency": 1,
+					"packetloss": 0
+				},
+				{
+					"ip": "192.0.2.36",
+					"status": "skipped",
+					"latency": 31,
+					"packetloss": 0
+				},
+				{
+					"ip": "192.0.2.37",
+					"status": "up",
+					"latency": 10,
+					"packetloss": 0
+				}
+			]
+		},
+		"wanb": {
+			"age": 4,
+			"online": 119499,
+			"offline": 0,
+			"uptime": 345596,
+			"score": 6,
+			"lost": 0,
+			"turn": 23697,
+			"status": "online",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"check_quality": true,
+			"track_ip": [
+				{
+					"ip": "192.0.2.35",
+					"status": "up",
+					"latency": 13,
+					"packetloss": 0
+				},
+				{
+					"ip": "192.0.2.36",
+					"status": "skipped",
+					"latency": 21,
+					"packetloss": 0
+				},
+				{
+					"ip": "192.0.2.37",
+					"status": "up",
+					"latency": 21,
+					"packetloss": 0
+				}
+			]
+		},
+		"wan_6": {
+			"age": 0,
+			"online": 318,
+			"offline": 0,
+			"uptime": 119462,
+			"score": 6,
+			"lost": 0,
+			"turn": 64,
+			"status": "online",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"check_quality": true,
+			"track_ip": [
+				{
+					"ip": "2001:db8:c::1",
+					"status": "up",
+					"latency": 1,
+					"packetloss": 0
+				},
+				{
+					"ip": "2001:db8:d::1",
+					"status": "skipped",
+					"latency": 999999,
+					"packetloss": 100
+				},
+				{
+					"ip": "2001:db8:e::1",
+					"status": "up",
+					"latency": 13,
+					"packetloss": 0
+				}
+			]
+		},
+		"wanb_6": {
+			"age": 3,
+			"online": 119499,
+			"offline": 0,
+			"uptime": 280459,
+			"score": 6,
+			"lost": 0,
+			"turn": 23691,
+			"status": "online",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"check_quality": true,
+			"track_ip": [
+				{
+					"ip": "2001:db8:c::1",
+					"status": "up",
+					"latency": 14,
+					"packetloss": 0
+				},
+				{
+					"ip": "2001:db8:d::1",
+					"status": "skipped",
+					"latency": 20,
+					"packetloss": 0
+				},
+				{
+					"ip": "2001:db8:e::1",
+					"status": "up",
+					"latency": 19,
+					"packetloss": 0
+				}
+			]
+		}
+	},
+	"connected": {
+		"ipv4": [
+			"192.0.2.38/24",
+			"192.0.2.39-192.0.2.40",
+			"192.0.2.41/24",
+			"192.0.2.42/24",
+			"192.0.2.43/24",
+			"224.0.0.0/3"
+		],
+		"ipv6": [
+			"2001:db8:f::/56",
+			"2001:db8:10::/64",
+			"2001:db8:11::/64",
+			"fd00:db8:12::1/48"
+		]
+	},
+	"policies": {
+		"ipv4": {
+			"wan_only": [
+				{
+					"interface": "wan",
+					"metric": 1,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				}
+			],
+			"wanb_only": [
+				{
+					"interface": "wanb",
+					"metric": 1,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				}
+			],
+			"wan_wanb": [
+				{
+					"interface": "wan",
+					"metric": 1,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				},
+				{
+					"interface": "wanb",
+					"metric": 2,
+					"weight": 1,
+					"percent": 0,
+					"status": "online"
+				}
+			],
+			"wanb_wan": [
+				{
+					"interface": "wanb",
+					"metric": 1,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				},
+				{
+					"interface": "wan",
+					"metric": 2,
+					"weight": 1,
+					"percent": 0,
+					"status": "online"
+				}
+			],
+			"wan10wanb": [
+				{
+					"interface": "wan",
+					"metric": 1,
+					"weight": 10,
+					"percent": 90,
+					"status": "online"
+				},
+				{
+					"interface": "wanb",
+					"metric": 1,
+					"weight": 1,
+					"percent": 9,
+					"status": "online"
+				}
+			]
+		},
+		"ipv6": {
+			"wan_6_wanb_6": [
+				{
+					"interface": "wan_6",
+					"metric": 1,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				},
+				{
+					"interface": "wanb_6",
+					"metric": 2,
+					"weight": 1,
+					"percent": 0,
+					"status": "online"
+				}
+			],
+			"wan_6_10_wanb_6": [
+				{
+					"interface": "wan_6",
+					"metric": 1,
+					"weight": 10,
+					"percent": 90,
+					"status": "online"
+				},
+				{
+					"interface": "wanb_6",
+					"metric": 1,
+					"weight": 1,
+					"percent": 9,
+					"status": "online"
+				}
+			]
+		}
+	}
+}

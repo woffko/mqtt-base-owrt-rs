@@ -1,0 +1,248 @@
+{
+	"acme": {
+		"instances": {}
+	},
+	"adblock": {
+		"instances": {
+			"adblock": {
+				"running": false
+			}
+		}
+	},
+	"banip": {
+		"instances": {
+			"banip-service": {
+				"running": true
+			}
+		}
+	},
+	"bcp38": {
+		"instances": {}
+	},
+	"bridger": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"cake-autorate": {
+		"instances": {
+			"wan_sqm": {
+				"running": true
+			},
+			"wanb_sqm": {
+				"running": true
+			}
+		}
+	},
+	"cake-autorate-autotune": {
+		"instances": {
+			"coordinator": {
+				"running": true
+			}
+		}
+	},
+	"chronyd": {
+		"instances": {
+			"instance1": {
+				"running": true
+			},
+			"instance2": {
+				"running": false
+			}
+		}
+	},
+	"collectd": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"cron": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"ddns": {
+		"instances": {
+			"myddns_ipv4": {
+				"running": true
+			}
+		}
+	},
+	"dnsmasq": {
+		"instances": {
+			"cfg01411c": {
+				"running": true
+			}
+		}
+	},
+	"dropbear": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"firewall": {
+		"instances": {}
+	},
+	"gpio_switch": {
+		"instances": {}
+	},
+	"ha-cluster": {
+		"instances": {
+			"keepalived": {
+				"running": true
+			},
+			"lease-sync": {
+				"running": true
+			},
+			"owsync": {
+				"running": true
+			}
+		}
+	},
+	"keepalived-inotify": {
+		"instances": {}
+	},
+	"log": {
+		"instances": {
+			"logd": {
+				"running": true
+			},
+			"logremote": {
+				"running": true
+			}
+		}
+	},
+	"luci_statistics": {
+		"instances": {}
+	},
+	"miniupnpd": {
+		"instances": {}
+	},
+	"mwan3": {
+		"instances": {
+			"rtmon_ipv4": {
+				"running": true
+			},
+			"rtmon_ipv6": {
+				"running": true
+			},
+			"track_wan": {
+				"running": true
+			},
+			"track_wan_6": {
+				"running": true
+			},
+			"track_wanb": {
+				"running": true
+			},
+			"track_wanb_6": {
+				"running": true
+			}
+		}
+	},
+	"network": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"neuroguard": {
+		"instances": {
+			"neuroguard-ct": {
+				"running": true
+			},
+			"neuroguard-dns": {
+				"running": true
+			},
+			"neuroguard-fw-helper": {
+				"running": true
+			},
+			"neuroguardd": {
+				"running": true
+			}
+		}
+	},
+	"packet_steering": {
+		"instances": {}
+	},
+	"qemu-ga": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"rpcd": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"socat": {
+		"instances": {}
+	},
+	"sqm": {
+		"instances": {}
+	},
+	"sysntpd": {
+		"instances": {}
+	},
+	"system": {
+		"instances": {}
+	},
+	"ttyd": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"ubus": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"ucitrack": {
+		"instances": {}
+	},
+	"uhttpd": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	},
+	"unbound": {
+		"instances": {
+			"unbound": {
+				"running": true
+			}
+		}
+	},
+	"urandom_seed": {
+		"instances": {
+			"urandom_seed": {
+				"running": false
+			}
+		}
+	},
+	"urngd": {
+		"instances": {
+			"instance1": {
+				"running": true
+			}
+		}
+	}
+}

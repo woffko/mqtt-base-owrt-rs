@@ -1,0 +1,17 @@
+{
+	"kernel": "6.12.107",
+	"hostname": "router-secondary",
+	"system": "Intel(R) Core(TM) i3-N305",
+	"model": "QEMU Standard PC (Q35 + ICH9, 2009)",
+	"board_name": "qemu-standard-pc-q35-ich9-2009",
+	"rootfs_type": "ext4",
+	"release": {
+		"distribution": "OpenWrt",
+		"version": "25.12-SNAPSHOT",
+		"firmware_url": "https://downloads.openwrt.org/",
+		"revision": "r0+1524-b6a820ea85",
+		"target": "x86/64",
+		"description": "OpenWrt 25.12-SNAPSHOT r0+1524-b6a820ea85",
+		"builddate": "1787735433"
+	}
+}

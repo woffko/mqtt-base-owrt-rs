@@ -1,0 +1,141 @@
+{
+	"dhcp_leases": [
+		{
+			"expires": 42546,
+			"hostname": "client-1",
+			"macaddr": "02:00:00:00:00:01",
+			"ipaddr": "192.0.2.1"
+		},
+		{
+			"expires": 33933,
+			"hostname": "client-2",
+			"macaddr": "02:00:00:00:00:02",
+			"ipaddr": "192.0.2.2"
+		},
+		{
+			"expires": 33928,
+			"hostname": "client-3",
+			"macaddr": "02:00:00:00:00:03",
+			"ipaddr": "192.0.2.3"
+		},
+		{
+			"expires": 30605,
+			"hostname": "client-4",
+			"macaddr": "02:00:00:00:00:04",
+			"ipaddr": "192.0.2.4"
+		},
+		{
+			"expires": 9463,
+			"macaddr": "02:00:00:00:00:05",
+			"ipaddr": "192.0.2.5"
+		},
+		{
+			"expires": 26536,
+			"macaddr": "02:00:00:00:00:06",
+			"ipaddr": "192.0.2.6"
+		},
+		{
+			"expires": 30595,
+			"hostname": "client-5",
+			"macaddr": "02:00:00:00:00:07",
+			"ipaddr": "192.0.2.7"
+		},
+		{
+			"expires": 27524,
+			"hostname": "client-6",
+			"macaddr": "02:00:00:00:00:08",
+			"ipaddr": "192.0.2.8"
+		},
+		{
+			"expires": 26512,
+			"hostname": "client-7",
+			"macaddr": "02:00:00:00:00:09",
+			"ipaddr": "192.0.2.9"
+		},
+		{
+			"expires": 36365,
+			"hostname": "client-8",
+			"macaddr": "02:00:00:00:00:0a",
+			"ipaddr": "192.0.2.10"
+		},
+		{
+			"expires": 25921,
+			"hostname": "client-9",
+			"macaddr": "02:00:00:00:00:0b",
+			"ipaddr": "192.0.2.11"
+		},
+		{
+			"expires": 42570,
+			"hostname": "client-10",
+			"macaddr": "02:00:00:00:00:0c",
+			"ipaddr": "192.0.2.12"
+		},
+		{
+			"expires": 41114,
+			"hostname": "client-11",
+			"macaddr": "02:00:00:00:00:0d",
+			"ipaddr": "192.0.2.13"
+		},
+		{
+			"expires": 41344,
+			"hostname": "client-12",
+			"macaddr": "02:00:00:00:00:0e",
+			"ipaddr": "192.0.2.14"
+		},
+		{
+			"expires": 33556,
+			"hostname": "client-13",
+			"macaddr": "02:00:00:00:00:0f",
+			"ipaddr": "192.0.2.15"
+		},
+		{
+			"expires": 33686,
+			"hostname": "client-14",
+			"macaddr": "02:00:00:00:00:10",
+			"ipaddr": "192.0.2.16"
+		},
+		{
+			"expires": 24559,
+			"hostname": "client-15",
+			"macaddr": "02:00:00:00:00:11",
+			"ipaddr": "192.0.2.17"
+		},
+		{
+			"expires": 30788,
+			"hostname": "client-16",
+			"macaddr": "02:00:00:00:00:12",
+			"ipaddr": "192.0.2.18"
+		},
+		{
+			"expires": 21835,
+			"hostname": "client-17",
+			"macaddr": "02:00:00:00:00:13",
+			"ipaddr": "192.0.2.19"
+		},
+		{
+			"expires": 26628,
+			"hostname": "client-18",
+			"macaddr": "02:00:00:00:00:14",
+			"ipaddr": "192.0.2.20"
+		},
+		{
+			"expires": 24058,
+			"hostname": "client-19",
+			"macaddr": "02:00:00:00:00:15",
+			"ipaddr": "192.0.2.21"
+		},
+		{
+			"expires": 28672,
+			"hostname": "client-20",
+			"macaddr": "02:00:00:00:00:16",
+			"ipaddr": "192.0.2.22"
+		},
+		{
+			"expires": 32116,
+			"hostname": "client-21",
+			"macaddr": "02:00:00:00:00:17",
+			"ipaddr": "192.0.2.23"
+		}
+	],
+	"dhcp6_leases": []
+}

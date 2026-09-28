@@ -1,0 +1,43 @@
+{
+	"role": "MASTER",
+	"instances": {
+		"1": "MASTER",
+		"2": "MASTER",
+		"3": "MASTER",
+		"4": "MASTER",
+		"5": "MASTER"
+	},
+	"peers": [
+		{
+			"name": "backup",
+			"address": "192.0.2.24",
+			"online": true,
+			"last_seen": "Just now"
+		}
+	],
+	"state": "HEALTHY",
+	"services": {
+		"keepalived": {
+			"required": true,
+			"running": true,
+			"pid": 4969,
+			"uptime": 867123
+		},
+		"owsync": {
+			"required": true,
+			"running": true,
+			"pid": 4970,
+			"uptime": 867123
+		},
+		"lease-sync": {
+			"required": true,
+			"running": true,
+			"pid": 19516,
+			"uptime": 340519
+		}
+	},
+	"sync": {
+		"config_last_sync": 1782841497,
+		"lease_last_sync": 1790619237
+	}
+}

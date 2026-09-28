@@ -1,0 +1,8 @@
+target/
+logs/
+node_modules/
+*.apk
+*.ipk
+.env
+dist/
+__pycache__/

@@ -1,0 +1,342 @@
+{
+	"interface": [
+		{
+			"interface": "lan",
+			"up": true,
+			"pending": false,
+			"available": true,
+			"autostart": true,
+			"dynamic": false,
+			"uptime": 867468,
+			"l3_device": "br-lan",
+			"proto": "static",
+			"device": "br-lan",
+			"updated": [
+				"addresses"
+			],
+			"metric": 0,
+			"dns_metric": 0,
+			"delegation": true,
+			"ipv4-address": [
+				{
+					"address": "192.0.2.53",
+					"mask": 24
+				},
+				{
+					"address": "192.0.2.54",
+					"mask": 24
+				}
+			],
+			"ipv6-address": [
+				{
+					"address": "fd00:db8:1a::1",
+					"mask": 64
+				}
+			],
+			"ipv6-prefix": [],
+			"ipv6-prefix-assignment": [],
+			"route": [],
+			"dns-server": [],
+			"dns-search": [],
+			"neighbors": [],
+			"inactive": {
+				"ipv4-address": [],
+				"ipv6-address": [],
+				"route": [],
+				"dns-server": [],
+				"dns-search": [],
+				"neighbors": []
+			}
+		},
+		{
+			"interface": "loopback",
+			"up": true,
+			"pending": false,
+			"available": true,
+			"autostart": true,
+			"dynamic": false,
+			"uptime": 867468,
+			"l3_device": "lo",
+			"proto": "static",
+			"device": "lo",
+			"updated": [
+				"addresses"
+			],
+			"metric": 0,
+			"dns_metric": 0,
+			"delegation": true,
+			"ipv4-address": [
+				{
+					"address": "127.0.0.1",
+					"mask": 8
+				}
+			],
+			"ipv6-address": [
+				{
+					"address": "::1",
+					"mask": 128
+				}
+			],
+			"ipv6-prefix": [],
+			"ipv6-prefix-assignment": [],
+			"route": [],
+			"dns-server": [],
+			"dns-search": [],
+			"neighbors": [],
+			"inactive": {
+				"ipv4-address": [],
+				"ipv6-address": [],
+				"route": [],
+				"dns-server": [],
+				"dns-search": [],
+				"neighbors": []
+			}
+		},
+		{
+			"interface": "sync",
+			"up": true,
+			"pending": false,
+			"available": true,
+			"autostart": true,
+			"dynamic": false,
+			"uptime": 867468,
+			"l3_device": "eth2",
+			"proto": "static",
+			"device": "eth2",
+			"updated": [
+				"addresses"
+			],
+			"metric": 0,
+			"dns_metric": 0,
+			"delegation": true,
+			"ipv4-address": [
+				{
+					"address": "192.0.2.24",
+					"mask": 24
+				}
+			],
+			"ipv6-address": [],
+			"ipv6-prefix": [],
+			"ipv6-prefix-assignment": [],
+			"route": [],
+			"dns-server": [],
+			"dns-search": [],
+			"neighbors": [],
+			"inactive": {
+				"ipv4-address": [],
+				"ipv6-address": [],
+				"route": [],
+				"dns-server": [],
+				"dns-search": [],
+				"neighbors": []
+			}
+		},
+		{
+			"interface": "wan",
+			"up": false,
+			"pending": false,
+			"available": true,
+			"autostart": false,
+			"dynamic": false,
+			"proto": "pppoe",
+			"device": "eth4",
+			"errors": [
+				{
+					"subsystem": "pppoe",
+					"code": "USER_REQUEST"
+				}
+			]
+		},
+		{
+			"interface": "wanb",
+			"up": true,
+			"pending": false,
+			"available": true,
+			"autostart": true,
+			"dynamic": false,
+			"uptime": 867468,
+			"l3_device": "eth0",
+			"proto": "static",
+			"device": "eth0",
+			"updated": [
+				"addresses",
+				"routes"
+			],
+			"metric": 20,
+			"dns_metric": 0,
+			"delegation": false,
+			"ipv4-address": [
+				{
+					"address": "192.0.2.34",
+					"mask": 24
+				}
+			],
+			"ipv6-address": [],
+			"ipv6-prefix": [],
+			"ipv6-prefix-assignment": [],
+			"route": [
+				{
+					"target": "0.0.0.0",
+					"mask": 0,
+					"nexthop": "192.0.2.32",
+					"source": "0.0.0.0/0"
+				}
+			],
+			"dns-server": [],
+			"dns-search": [],
+			"neighbors": [],
+			"inactive": {
+				"ipv4-address": [],
+				"ipv6-address": [],
+				"route": [],
+				"dns-server": [],
+				"dns-search": [],
+				"neighbors": []
+			}
+		},
+		{
+			"interface": "wanb_6",
+			"up": true,
+			"pending": false,
+			"available": true,
+			"autostart": true,
+			"dynamic": false,
+			"uptime": 280459,
+			"l3_device": "eth0",
+			"proto": "dhcpv6",
+			"device": "eth0",
+			"metric": 20,
+			"dns_metric": 0,
+			"delegation": false,
+			"ipv4-address": [],
+			"ipv6-address": [
+				{
+					"address": "2001:db8:b::1",
+					"mask": 64,
+					"preferred": 2514,
+					"valid": 5214
+				}
+			],
+			"ipv6-prefix": [],
+			"ipv6-prefix-assignment": [],
+			"route": [
+				{
+					"target": "2001:db8:11::",
+					"mask": 64,
+					"nexthop": "::",
+					"metric": 256,
+					"valid": 5214,
+					"source": "::/0"
+				},
+				{
+					"target": "::",
+					"mask": 0,
+					"nexthop": "fe80::9",
+					"metric": 512,
+					"valid": 1614,
+					"source": "2001:db8:b::1/64"
+				}
+			],
+			"dns-server": [],
+			"dns-search": [],
+			"neighbors": [],
+			"inactive": {
+				"ipv4-address": [],
+				"ipv6-address": [],
+				"route": [],
+				"dns-server": [
+					"2001:db8:16::1"
+				],
+				"dns-search": [],
+				"neighbors": []
+			}
+		},
+		{
+			"interface": "wifi87",
+			"up": true,
+			"pending": false,
+			"available": true,
+			"autostart": true,
+			"dynamic": false,
+			"uptime": 867468,
+			"l3_device": "bond0.87",
+			"proto": "static",
+			"device": "bond0.87",
+			"updated": [
+				"addresses"
+			],
+			"metric": 0,
+			"dns_metric": 0,
+			"delegation": true,
+			"ipv4-address": [
+				{
+					"address": "192.0.2.55",
+					"mask": 24
+				}
+			],
+			"ipv6-address": [
+				{
+					"address": "fd00:db8:1b::1",
+					"mask": 64
+				}
+			],
+			"ipv6-prefix": [],
+			"ipv6-prefix-assignment": [],
+			"route": [],
+			"dns-server": [],
+			"dns-search": [],
+			"neighbors": [],
+			"inactive": {
+				"ipv4-address": [],
+				"ipv6-address": [],
+				"route": [],
+				"dns-server": [],
+				"dns-search": [],
+				"neighbors": []
+			}
+		},
+		{
+			"interface": "wireguard",
+			"up": true,
+			"pending": false,
+			"available": true,
+			"autostart": true,
+			"dynamic": false,
+			"uptime": 867468,
+			"l3_device": "wireguard",
+			"proto": "wireguard",
+			"updated": [
+				"addresses"
+			],
+			"metric": 0,
+			"dns_metric": 0,
+			"delegation": false,
+			"ipv4-address": [
+				{
+					"address": "192.0.2.56",
+					"mask": 24
+				}
+			],
+			"ipv6-address": [
+				{
+					"address": "fd00:db8:1c::1",
+					"mask": 64
+				}
+			],
+			"ipv6-prefix": [],
+			"ipv6-prefix-assignment": [],
+			"route": [],
+			"dns-server": [],
+			"dns-search": [],
+			"neighbors": [],
+			"inactive": {
+				"ipv4-address": [],
+				"ipv6-address": [],
+				"route": [],
+				"dns-server": [],
+				"dns-search": [],
+				"neighbors": []
+			}
+		}
+	]
+}

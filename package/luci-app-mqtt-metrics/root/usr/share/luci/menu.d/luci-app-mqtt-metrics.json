@@ -1,0 +1,57 @@
+{
+	"admin/services/mqtt-metrics": {
+		"title": "MQTT Metrics",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-mqtt-metrics"
+			],
+			"uci": {
+				"mqtt-metrics": true
+			}
+		}
+	},
+	"admin/services/mqtt-metrics/status": {
+		"title": "Status",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "mqtt-metrics/status"
+		}
+	},
+	"admin/services/mqtt-metrics/broker": {
+		"title": "Broker",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "mqtt-metrics/broker"
+		}
+	},
+	"admin/services/mqtt-metrics/topics": {
+		"title": "Topics and device",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "mqtt-metrics/topics"
+		}
+	},
+	"admin/services/mqtt-metrics/metrics": {
+		"title": "Metrics",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "mqtt-metrics/metrics"
+		}
+	},
+	"admin/services/mqtt-metrics/diagnostics": {
+		"title": "Diagnostics",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "mqtt-metrics/diagnostics"
+		}
+	}
+}

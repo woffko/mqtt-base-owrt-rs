@@ -1,0 +1,20 @@
+{
+	"wireguard": {
+		"name": "wireguard",
+		"public_key": "TESTKEY03AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"listen_port": "51820",
+		"fwmark": "off",
+		"peers": [
+			{
+				"name": "peer-2",
+				"public_key": "TESTKEY04AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+				"endpoint": "(none)",
+				"allowed_ips": [],
+				"latest_handshake": "0",
+				"transfer_rx": "0",
+				"transfer_tx": "0",
+				"persistent_keepalive": "off"
+			}
+		]
+	}
+}

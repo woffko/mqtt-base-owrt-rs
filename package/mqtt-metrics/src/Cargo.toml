@@ -1,0 +1,32 @@
+[package]
+name = "mqtt-metrics"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+license = "GPL-2.0-or-later"
+description = "Read-only router metrics publisher for MQTT and Home Assistant on OpenWrt"
+publish = false
+
+[features]
+default = []
+# TLS transport with rustls and the ring provider (ADR-0001).
+tls = ["dep:rustls"]
+
+[dependencies]
+serde_json = "=1.0.151"
+signal-hook = { version = "=0.3.18", default-features = false }
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+
+[dev-dependencies]
+rcgen = { version = "=0.13.2", default-features = false, features = ["crypto", "pem", "ring"] }
+
+[[bin]]
+name = "mqtt-metricsd"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

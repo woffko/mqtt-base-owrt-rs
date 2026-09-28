@@ -1,0 +1,269 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+//! Collectors turn data sources into typed samples.
+//!
+//! A collector never formats payloads and never invents values: a missing
+//! source becomes an unavailable reading (or a missing template) with a
+//! reason that LuCI shows next to the metric.
+
+mod dhcp;
+mod hacluster;
+mod iface;
+mod mwan3;
+pub mod net;
+mod packages;
+mod services;
+mod system;
+mod traffic;
+mod wifi;
+mod wireguard;
+
+pub use services::available as services_available;
+
+use std::collections::BTreeMap;
+
+use crate::catalog::{Group, Instance, Kind, MetricDef, ALL};
+use crate::config::Config;
+use crate::source::{Source, SourceError, SourceResult};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Text(String),
+    Int(i64),
+    /// Value and number of decimals used in the payload.
+    Float(f64, u8),
+    Bool(bool),
+}
+
+impl Value {
+    /// MQTT payload for this value.
+    pub fn payload(&self, kind: Kind) -> String {
+        match (self, kind) {
+            (Value::Bool(b), Kind::Binary { on, off }) => (if *b { on } else { off }).to_string(),
+            (Value::Bool(b), Kind::Sensor) => (if *b { "true" } else { "false" }).to_string(),
+            (Value::Text(t), _) => t.clone(),
+            (Value::Int(i), _) => i.to_string(),
+            (Value::Float(v, d), _) => format!("{:.*}", usize::from(*d), v),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reading {
+    Value(Value),
+    /// No value right now. `permanent` means the entity can never have a
+    /// value on this router (for example IPv4 on a DHCPv6-only interface), so
+    /// it is not announced to Home Assistant.
+    Unavailable {
+        reason: String,
+        permanent: bool,
+    },
+}
+
+impl Reading {
+    pub fn text(value: impl Into<String>) -> Reading {
+        Reading::Value(Value::Text(value.into()))
+    }
+
+    pub fn missing(reason: impl Into<String>) -> Reading {
+        Reading::Unavailable {
+            reason: reason.into(),
+            permanent: false,
+        }
+    }
+
+    pub fn impossible(reason: impl Into<String>) -> Reading {
+        Reading::Unavailable {
+            reason: reason.into(),
+            permanent: true,
+        }
+    }
+
+    /// Text reading that is unavailable when empty.
+    pub fn non_empty(value: String, reason: &str) -> Reading {
+        if value.is_empty() {
+            Reading::missing(reason)
+        } else {
+            Reading::Value(Value::Text(value))
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sample {
+    pub def: &'static MetricDef,
+    pub inst: Instance,
+    pub reading: Reading,
+}
+
+impl Sample {
+    pub fn new(def: &'static MetricDef, inst: Instance, reading: Reading) -> Sample {
+        Sample { def, inst, reading }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GroupResult {
+    pub samples: Vec<Sample>,
+    /// Templates without any instance on this router, with the reason.
+    pub missing: Vec<(&'static MetricDef, String)>,
+}
+
+impl GroupResult {
+    fn push(&mut self, def: &'static MetricDef, inst: Instance, reading: Reading) {
+        self.samples.push(Sample::new(def, inst, reading));
+    }
+
+    fn miss(&mut self, def: &'static MetricDef, reason: impl Into<String>) {
+        self.missing.push((def, reason.into()));
+    }
+
+    /// Mark every template of `group` as missing.
+    fn miss_group(&mut self, group: Group, reason: &str) {
+        for def in ALL.iter().copied().filter(|d| d.group == group) {
+            self.miss(def, reason);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CpuTimes {
+    pub total: u64,
+    pub idle: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Counters {
+    pub rx: u64,
+    pub tx: u64,
+    pub at: f64,
+}
+
+/// State kept between collection rounds (rates and cached constants).
+#[derive(Debug, Clone, Default)]
+pub struct CollectorState {
+    pub cpu: BTreeMap<String, CpuTimes>,
+    pub traffic: BTreeMap<String, Counters>,
+    pub arch: Option<String>,
+}
+
+pub struct Context<'a> {
+    pub source: &'a dyn Source,
+    pub cfg: &'a Config,
+    /// Unix time in seconds.
+    pub now: u64,
+    /// Monotonic time in seconds, for rates.
+    pub mono: f64,
+}
+
+/// Data shared by several groups in one round.
+#[derive(Default)]
+pub struct RoundCache {
+    net: Option<SourceResult<net::NetView>>,
+}
+
+impl RoundCache {
+    pub fn net(&mut self, ctx: &Context) -> &SourceResult<net::NetView> {
+        self.net
+            .get_or_insert_with(|| net::view(ctx.source, ctx.cfg))
+    }
+}
+
+/// Collect one group.
+pub fn collect(
+    group: Group,
+    ctx: &Context,
+    cache: &mut RoundCache,
+    state: &mut CollectorState,
+) -> GroupResult {
+    let mut out = GroupResult::default();
+    match group {
+        Group::System => system::collect(ctx, state, &mut out),
+        Group::Interface => iface::collect(ctx, cache, &mut out),
+        Group::Traffic => traffic::collect(ctx, cache, state, &mut out),
+        Group::Mwan3 => mwan3::collect(ctx, &mut out),
+        Group::HaCluster => hacluster::collect(ctx, &mut out),
+        Group::Dhcp => dhcp::collect(ctx, &mut out),
+        Group::WireGuard => wireguard::collect(ctx, &mut out),
+        Group::Wifi => wifi::collect(ctx, &mut out),
+        Group::Service => services::collect(ctx, &mut out),
+        Group::Packages => packages::collect(ctx, &mut out),
+    }
+    out
+}
+
+/// Runtime hostname, as the legacy script resolves it.
+pub fn hostname(source: &dyn Source) -> String {
+    if let Ok(name) = source.command("uci", &["-q", "get", "system.@system[0].hostname"]) {
+        let name = name.trim();
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    if let Ok(name) = source.read("/proc/sys/kernel/hostname") {
+        let name = name.trim();
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+    "openwrt".to_string()
+}
+
+/// Human-readable reason for a failed source call.
+fn reason(err: &SourceError) -> String {
+    err.to_string()
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::source::FixtureSource;
+    use std::path::PathBuf;
+
+    pub fn fixture(node: &str) -> FixtureSource {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/fixtures")
+            .join(node);
+        FixtureSource::new(&dir)
+    }
+
+    pub fn run(
+        group: Group,
+        source: &dyn Source,
+        cfg: &Config,
+        state: &mut CollectorState,
+        mono: f64,
+    ) -> GroupResult {
+        let ctx = Context {
+            source,
+            cfg,
+            now: source.now(),
+            mono,
+        };
+        collect(group, &ctx, &mut RoundCache::default(), state)
+    }
+
+    pub fn value_of(result: &GroupResult, id: &str, name: &str, sub: &str) -> Option<Reading> {
+        result
+            .samples
+            .iter()
+            .find(|s| s.def.id == id && s.inst.name == name && s.inst.sub == sub)
+            .map(|s| s.reading.clone())
+    }
+
+    #[test]
+    fn payload_formats() {
+        let binary = Kind::Binary {
+            on: "up",
+            off: "down",
+        };
+        assert_eq!(Value::Bool(true).payload(binary), "up");
+        assert_eq!(Value::Bool(false).payload(binary), "down");
+        assert_eq!(Value::Float(1.23456, 2).payload(Kind::Sensor), "1.23");
+        assert_eq!(Value::Int(-5).payload(Kind::Sensor), "-5");
+    }
+
+    #[test]
+    fn hostname_from_fixture() {
+        assert_eq!(hostname(&fixture("primary")), "router-primary");
+    }
+}

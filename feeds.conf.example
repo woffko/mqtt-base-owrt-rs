@@ -1,0 +1,3 @@
+src-git mqtt_metrics https://github.com/woffko/mqtt-base-owrt-rs.git
+# Local development alternative:
+# src-link mqtt_metrics /home/w0w/mqtt-base-owrt-rs/package

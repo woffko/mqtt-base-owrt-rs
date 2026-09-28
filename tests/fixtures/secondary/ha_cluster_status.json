@@ -1,0 +1,43 @@
+{
+	"role": "BACKUP",
+	"instances": {
+		"1": "BACKUP",
+		"2": "BACKUP",
+		"3": "BACKUP",
+		"4": "BACKUP",
+		"5": "BACKUP"
+	},
+	"peers": [
+		{
+			"name": "master",
+			"address": "192.0.2.46",
+			"online": true,
+			"last_seen": "Just now"
+		}
+	],
+	"state": "HEALTHY",
+	"services": {
+		"keepalived": {
+			"required": true,
+			"running": true,
+			"pid": 5362,
+			"uptime": 867467
+		},
+		"owsync": {
+			"required": true,
+			"running": true,
+			"pid": 5363,
+			"uptime": 867467
+		},
+		"lease-sync": {
+			"required": true,
+			"running": true,
+			"pid": 5364,
+			"uptime": 867467
+		}
+	},
+	"sync": {
+		"config_last_sync": 1782839940,
+		"lease_last_sync": 1790619237
+	}
+}

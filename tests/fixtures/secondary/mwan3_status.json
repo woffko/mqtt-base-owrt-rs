@@ -1,0 +1,230 @@
+{
+	"interfaces": {
+		"wan": {
+			"age": 867085,
+			"online": 0,
+			"offline": 867085,
+			"uptime": 0,
+			"score": 4,
+			"lost": 6,
+			"turn": 12,
+			"status": "disabled",
+			"enabled": true,
+			"running": false,
+			"tracking": "paused",
+			"up": false,
+			"check_quality": true,
+			"track_ip": [
+				{
+					"ip": "192.0.2.35",
+					"status": "down",
+					"latency": 999999,
+					"packetloss": 100
+				},
+				{
+					"ip": "192.0.2.36",
+					"status": "down",
+					"latency": 999999,
+					"packetloss": 100
+				},
+				{
+					"ip": "192.0.2.37",
+					"status": "down",
+					"latency": 999999,
+					"packetloss": 100
+				}
+			]
+		},
+		"wanb": {
+			"age": 3,
+			"online": 587682,
+			"offline": 0,
+			"uptime": 867468,
+			"score": 6,
+			"lost": 0,
+			"turn": 116350,
+			"status": "online",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"check_quality": true,
+			"track_ip": [
+				{
+					"ip": "192.0.2.35",
+					"status": "up",
+					"latency": 12,
+					"packetloss": 0
+				},
+				{
+					"ip": "192.0.2.36",
+					"status": "skipped",
+					"latency": 21,
+					"packetloss": 0
+				},
+				{
+					"ip": "192.0.2.37",
+					"status": "up",
+					"latency": 18,
+					"packetloss": 0
+				}
+			]
+		},
+		"wan_6": {
+			"age": 4,
+			"online": 0,
+			"offline": 867107,
+			"uptime": 0,
+			"score": 0,
+			"lost": 504744,
+			"turn": 168251,
+			"status": "offline",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": false,
+			"check_quality": true,
+			"track_ip": [
+				{
+					"ip": "2001:db8:c::1",
+					"status": "down",
+					"latency": 999999,
+					"packetloss": 100
+				},
+				{
+					"ip": "2001:db8:d::1",
+					"status": "down",
+					"latency": 999999,
+					"packetloss": 100
+				},
+				{
+					"ip": "2001:db8:e::1",
+					"status": "down",
+					"latency": 999999,
+					"packetloss": 100
+				}
+			]
+		},
+		"wanb_6": {
+			"age": 0,
+			"online": 280416,
+			"offline": 0,
+			"uptime": 280459,
+			"score": 6,
+			"lost": 0,
+			"turn": 55531,
+			"status": "online",
+			"enabled": true,
+			"running": true,
+			"tracking": "active",
+			"up": true,
+			"check_quality": true,
+			"track_ip": [
+				{
+					"ip": "2001:db8:c::1",
+					"status": "up",
+					"latency": 11,
+					"packetloss": 0
+				},
+				{
+					"ip": "2001:db8:d::1",
+					"status": "skipped",
+					"latency": 16,
+					"packetloss": 0
+				},
+				{
+					"ip": "2001:db8:e::1",
+					"status": "up",
+					"latency": 17,
+					"packetloss": 0
+				}
+			]
+		}
+	},
+	"connected": {
+		"ipv4": [
+			"192.0.2.38/24",
+			"192.0.2.39-192.0.2.40",
+			"192.0.2.41/24",
+			"192.0.2.42/24",
+			"192.0.2.52/24",
+			"224.0.0.0/3"
+		],
+		"ipv6": [
+			"2001:db8:11::/64",
+			"fd00:db8:12::1/48"
+		]
+	},
+	"policies": {
+		"ipv4": {
+			"wan_only": [
+				{
+					"interface": "wan",
+					"metric": 1,
+					"weight": 1,
+					"percent": 0,
+					"status": "disabled"
+				}
+			],
+			"wanb_only": [
+				{
+					"interface": "wanb",
+					"metric": 1,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				}
+			],
+			"wan_wanb": [
+				{
+					"interface": "wan",
+					"metric": 1,
+					"weight": 1,
+					"percent": 0,
+					"status": "disabled"
+				},
+				{
+					"interface": "wanb",
+					"metric": 2,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				}
+			],
+			"wanb_wan": [
+				{
+					"interface": "wanb",
+					"metric": 1,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				},
+				{
+					"interface": "wan",
+					"metric": 2,
+					"weight": 1,
+					"percent": 0,
+					"status": "disabled"
+				}
+			]
+		},
+		"ipv6": {
+			"wan_6_wanb_6": [
+				{
+					"interface": "wan_6",
+					"metric": 1,
+					"weight": 1,
+					"percent": 0,
+					"status": "offline"
+				},
+				{
+					"interface": "wanb_6",
+					"metric": 2,
+					"weight": 1,
+					"percent": 100,
+					"status": "online"
+				}
+			]
+		}
+	}
+}
