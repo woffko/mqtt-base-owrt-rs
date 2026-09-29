@@ -79,7 +79,13 @@ Development checks (formatting, clippy, Rust and LuCI tests):
 
 ```sh
 tools/check.sh
+E2E=1 tools/check.sh    # also runs the daemon against a fake broker (about 90 s)
 ```
+
+`tools/luci-real.browser.js` (part of the checks where Playwright and an SDK
+are available) runs the LuCI pages on the real LuCI client code, and
+`tools/e2e-smoke.sh` runs the real daemon against a fake broker and fake
+`uci`/`ubus` commands. Run the second one before a deployment.
 
 ## Documentation
 
