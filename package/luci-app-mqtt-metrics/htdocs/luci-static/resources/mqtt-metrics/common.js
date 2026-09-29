@@ -29,6 +29,12 @@ var callReload = rpc.declare({ object: 'mqtt-metrics', method: 'reload', reject:
 var BOOL_FIELDS = [ 'publish', 'discovery', 'ha_enabled', 'diagnostic' ];
 var TEXT_FIELDS = [ 'name', 'object_id', 'topic', 'icon' ];
 
+// The message of a failed call. LuCI's RPC errors carry the stack after the
+// first line of the message, which is of no use to the person reading it.
+function errorText(err) {
+	return String((err && err.message) ? err.message : err).split('\n')[0];
+}
+
 // Text node for backend data: LuCI's E() parses string children as HTML.
 function text(value) {
 	return document.createTextNode(value == null ? '' : String(value));
@@ -231,6 +237,7 @@ return baseclass.extend({
 	callPurge: callPurge,
 	callReload: callReload,
 	text: text,
+	errorText: errorText,
 	defaultsOf: defaultsOf,
 	currentOf: currentOf,
 	overrideOptions: overrideOptions,

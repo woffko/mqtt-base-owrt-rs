@@ -26,6 +26,14 @@ if [ -d /home/w0w/.local/share/playwright/node_modules/playwright ]; then
 else
 	echo "skipping tools/luci-view-tests.browser.js (no Playwright)"
 fi
+# The same views on the real LuCI client code (form, validation, rpc) from an
+# SDK; skipped where the SDK or Playwright is not available.
+SDK=${SDK:-/home/w0w/cake-autorate-rs-owrt/openwrt-sdk-25.12.5-x86-64_gcc-14.3.0_musl.Linux-x86_64}
+if [ -d /home/w0w/.local/share/playwright/node_modules/playwright ] && [ -f "$SDK/feeds/luci/modules/luci-base/htdocs/luci-static/resources/form.js" ]; then
+	node tools/luci-real.browser.js "$SDK"
+else
+	echo "skipping tools/luci-real.browser.js (no Playwright or no SDK with LuCI)"
+fi
 sh -n package/mqtt-metrics/files/etc/init.d/mqtt-metrics
 sh -n tools/e2e-smoke.sh
 python3 -m py_compile tools/sanitize-fixtures.py tools/parity-check.py tools/gen-topics.py tools/e2e/e2e.py

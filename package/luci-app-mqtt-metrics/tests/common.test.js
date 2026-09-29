@@ -60,6 +60,8 @@ assert.equal(mm.validName('a'.repeat(129)), false);
 // 65 Cyrillic letters are 65 characters but 130 bytes.
 assert.equal(mm.validName('\u0444'.repeat(64)), true);
 assert.equal(mm.validName('\u0444'.repeat(65)), false);
+assert.equal(mm.errorText(new Error('RPC call failed\n  at handleCallReply (rpc.js:94:7)')), 'RPC call failed');
+assert.equal(mm.errorText('plain'), 'plain');
 assert.equal(mm.validIcon(''), true);
 assert.equal(mm.validIcon('mdi:router'), true);
 assert.equal(mm.validIcon('router'), false);

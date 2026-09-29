@@ -15,19 +15,23 @@ return view.extend({
 
 	load: function() {
 		return Promise.all([
-			L.resolveDefault(mm.callCatalog(), {}),
-			L.resolveDefault(mm.callLegacy(), {}),
+			L.resolveDefault(mm.callCatalog(), null),
+			L.resolveDefault(mm.callLegacy(), null),
 			uci.load('mqtt-metrics')
 		]);
 	},
 
 	render: function(data) {
 		var self = this, catalog = data[0] || {}, legacy = data[1] || {};
+		// The catalog is the only source of the password state and of TLS
+		// support; when the call failed the page must not pretend to know.
+		var unknown = !data[0];
 		var identity = catalog.identity || {};
 		var m, s, o;
 
 		m = new form.Map('mqtt-metrics', _('MQTT Metrics: Broker'),
-			_('Connection to the MQTT broker. The password is stored outside UCI in a root-only file and is never sent back to the browser.'));
+			_('Connection to the MQTT broker. The password is stored outside UCI in a root-only file and is never sent back to the browser.') +
+			(unknown ? ' ' + _('The service did not answer, so what this page shows about the stored password and about TLS support may be wrong.') : ''));
 
 		s = m.section(form.NamedSection, 'main', 'main', _('Service'));
 		o = s.option(form.Flag, 'enabled', _('Enabled'));
@@ -48,6 +52,7 @@ return view.extend({
 		o.placeholder = '1883';
 		o = s.option(form.Value, 'username', _('User name'));
 		o = s.option(form.Value, '_password', _('Password'),
+			unknown ? _('The state of the stored password is unknown.') :
 			catalog.password_set ? _('A password is stored. Leave empty to keep it.') : _('No password is stored.'));
 		o.password = true;
 		o.placeholder = catalog.password_set ? _('(unchanged)') : '';
@@ -120,6 +125,8 @@ return view.extend({
 			return mm.callTest.apply(mm, args).then(function(res) {
 				ui.addNotification(null, E('p', {}, [ mm.text(res.ok ? res.message : (_('Connection failed') + ': ' + res.error)) ]),
 					res.ok ? 'info' : 'danger');
+			}).catch(function(err) {
+				ui.addNotification(null, E('p', {}, [ mm.text(_('Connection failed') + ': ' + mm.errorText(err)) ]), 'danger');
 			});
 		};
 
@@ -139,6 +146,8 @@ return view.extend({
 					}
 					ui.addNotification(null, E('p', {}, [ mm.text(_('Broker settings imported. Reloading the page.')) ]), 'info');
 					window.setTimeout(function() { window.location.reload(); }, 1500);
+				}).catch(function(err) {
+					ui.addNotification(null, E('p', {}, [ mm.text(_('Import failed') + ': ' + mm.errorText(err)) ]), 'danger');
 				});
 			};
 		}
@@ -147,6 +156,23 @@ return view.extend({
 			s = m.section(form.NamedSection, 'broker', 'broker', _('Legacy script'),
 				_('The legacy publish_metrics.sh script is installed, but its broker settings cannot be imported:') + ' ' + legacy.import_error);
 		}
+
+		// A browser that saved the router's own login could fill it into the
+		// broker's user name and password, and Save would store the router
+		// password as the broker password. The map renders again after a save,
+		// so the attributes are set on every render.
+		var renderContents = m.renderContents;
+		m.renderContents = function() {
+			return renderContents.apply(this, arguments).then(function(node) {
+				// LuCI makes the field type="text" first and switches it to
+				// "password" in the next frame, so it is found by its class.
+				node.querySelectorAll('input.cbi-input-password').forEach(function(i) { i.setAttribute('autocomplete', 'new-password'); });
+				var user = node.querySelector('[data-field="cbid.mqtt-metrics.broker.username"] input');
+				if (user)
+					user.setAttribute('autocomplete', 'off');
+				return node;
+			});
+		};
 
 		this.map = m;
 		return m.render();
@@ -165,6 +191,8 @@ return view.extend({
 					ui.addNotification(null, E('p', {}, [ mm.text(_('Password not saved') + ': ' + res.error) ]), 'danger');
 				else
 					ui.addNotification(null, E('p', {}, [ mm.text(res.password_set ? _('Password saved.') : _('Password removed.')) ]), 'info');
+			}).catch(function(err) {
+				ui.addNotification(null, E('p', {}, [ mm.text(_('Password not saved') + ': ' + mm.errorText(err)) ]), 'danger');
 			});
 		});
 	}

@@ -119,6 +119,13 @@ Found by the independent review of the same commit:
   trigger was lost); a configuration that could not be read is read again;
   passes caused by Home Assistant announcements are at least 30 s apart; a
   publish waits at most 10 s for the broker to acknowledge earlier messages.
+- Turning off "Retain states" clears the retained states left on the broker;
+  the availability topic is cleared when the base topic or node changes while
+  the service is stopped.
+- LuCI: the identity warning survives a save; the Broker page says when it
+  cannot know the password or TLS state; the password field is not filled by
+  password managers; failed calls show their message.
 - Tools: the parity check needs the daemon's dry run to name the removals it
   accepts; the browser scripts no longer print the router password in
-  errors.
+  errors; `tools/e2e-smoke.sh` runs the daemon against a fake broker and
+  `tools/luci-real.browser.js` runs the views on the real LuCI client code.

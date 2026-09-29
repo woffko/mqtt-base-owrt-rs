@@ -51,7 +51,8 @@ fs.mkdirSync(out, { recursive: true, mode: 0o700 });
 				if (!packet || packet.method !== 'call' || !Array.isArray(packet.params))
 					continue;
 				const [ , object, method ] = packet.params;
-				if ((object === 'uci' && [ 'set', 'add', 'delete', 'commit', 'apply', 'revert', 'confirm' ].includes(method)) ||
+				// The write methods of luci-base's ACL for uci, all of them.
+				if ((object === 'uci' && [ 'set', 'add', 'delete', 'order', 'rename', 'commit', 'apply', 'revert', 'confirm' ].includes(method)) ||
 				    (object === 'mqtt-metrics' && writeMethods.includes(method))) {
 					report.blocked.push({ kind, object, method });
 					return route.abort('blockedbyclient');

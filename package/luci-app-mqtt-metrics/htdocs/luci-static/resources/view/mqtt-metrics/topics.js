@@ -94,9 +94,18 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 
-		return m.render().then(function(node) {
-			node.insertBefore(warning, node.querySelector('.cbi-section'));
-			return node;
-		});
+		// The map renders its contents again after every save, which removes
+		// anything added to it by hand. The banner (and the baseline it compares
+		// with) is put back each time.
+		var renderContents = m.renderContents;
+		m.renderContents = function() {
+			return renderContents.apply(this, arguments).then(function(node) {
+				mm.IDENTITY_KEYS.forEach(function(k) { before[k] = uci.get('mqtt-metrics', 'identity', k) || ''; });
+				node.insertBefore(warning, node.querySelector('.cbi-section'));
+				updateWarning();
+				return node;
+			});
+		};
+		return m.render();
 	}
 });

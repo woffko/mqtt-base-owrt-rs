@@ -200,7 +200,7 @@ return view.extend({
 						dom.content(preview, mm.text(res.error ? res.error : (res.config_topic + '\n' + JSON.stringify(res.payload, null, 2))));
 					}).catch(function(err) {
 						preview.style.display = '';
-						dom.content(preview, mm.text(String(err)));
+						dom.content(preview, mm.text(mm.errorText(err)));
 					});
 				})
 			]),

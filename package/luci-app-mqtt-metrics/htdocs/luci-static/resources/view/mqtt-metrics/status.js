@@ -127,7 +127,7 @@ return view.extend({
 				ui.addNotification(null, E('p', {}, [ mm.text(title + ': ' + (res && (res.message || res.error) || (ok ? _('done') : _('failed')))) ]),
 					ok ? 'info' : 'danger');
 			}).catch(function(err) {
-				ui.addNotification(null, E('p', {}, [ mm.text(title + ': ' + err) ]), 'danger');
+				ui.addNotification(null, E('p', {}, [ mm.text(title + ': ' + mm.errorText(err)) ]), 'danger');
 			}).finally(function() {
 				btn.disabled = false;
 			});
