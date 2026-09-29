@@ -31,14 +31,26 @@ pub fn collect(ctx: &Context, cache: &mut RoundCache, out: &mut GroupResult) {
 fn interface(view: &NetView, name: &str, family: Family, out: &mut GroupResult) {
     let inst = || Instance::iface(family, name);
     let (no_v4, no_v6) = net::impossible_families(view, name);
+    let proto = view.proto(name).unwrap_or_default();
     let Some(dump) = view.dump.get(name) else {
+        // Dynamic interfaces (for example `wan_6` while its parent is down)
+        // are absent from netifd; their protocol still comes from UCI.
         out.push(&IFACE_STATUS, inst(), Reading::Value(Value::Bool(false)));
+        for (def, impossible, family) in [
+            (&IFACE_IPV4, no_v4, "IPv4"),
+            (&IFACE_GW4, no_v4, "IPv4"),
+            (&IFACE_IPV6, no_v6, "global IPv6"),
+            (&IFACE_GW6, no_v6, "global IPv6"),
+        ] {
+            let reading = if impossible {
+                Reading::impossible(format!("{proto} interfaces have no {family}"))
+            } else {
+                Reading::missing("interface is not known to netifd")
+            };
+            out.push(def, inst(), reading);
+        }
         for def in [
             &IFACE_DEVICE,
-            &IFACE_IPV4,
-            &IFACE_IPV6,
-            &IFACE_GW4,
-            &IFACE_GW6,
             &IFACE_PROTO,
             &IFACE_UPTIME,
             &IFACE_DNS,
@@ -222,6 +234,23 @@ mod tests {
         );
         assert!(matches!(
             value_of(&r, "iface.device", "wan", ""),
+            Some(Reading::Unavailable {
+                permanent: false,
+                ..
+            })
+        ));
+        // `wan_6` is absent from netifd while `wan` is down: its protocol
+        // comes from UCI and IPv4 stays impossible.
+        assert!(!r.samples.is_empty());
+        assert!(matches!(
+            value_of(&r, "iface.ipv4", "wan_6", ""),
+            Some(Reading::Unavailable {
+                permanent: true,
+                ..
+            })
+        ));
+        assert!(matches!(
+            value_of(&r, "iface.ipv6", "wan_6", ""),
             Some(Reading::Unavailable {
                 permanent: false,
                 ..

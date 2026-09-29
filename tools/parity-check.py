@@ -2,13 +2,15 @@
 """Compare the legacy script's retained topics with mqtt-metrics output.
 
 Usage:
-  parity-check.py --legacy LEGACY.txt --host HOSTNAME (--dump DUMP.jsonl | --shadow SHADOW.txt --shadow-prefix PREFIX)
+  parity-check.py --legacy LEGACY.txt --host HOSTNAME (--dump DUMP.jsonl | --shadow SHADOW.txt --shadow-prefix PREFIX | --retained AFTER.txt)
 
 LEGACY.txt and SHADOW.txt are `mosquitto_sub -v` captures ("topic payload"
 per line). DUMP.jsonl is the output of `mqtt-metricsd --dump`, which is what
 the daemon would publish with the legacy-compatible defaults. In shadow mode
 only state topics are compared, after mapping PREFIX/<host> to
-openwrt/<host>.
+openwrt/<host>. --retained compares a capture of the production topics
+taken after the cutover (states and discovery configs); documented
+removals must be absent from it.
 
 Allowed differences (documented in docs/TOPICS.md):
 - legacy entities that can never have a value are cleared by mqtt-metrics;
@@ -66,6 +68,7 @@ def main():
     ap.add_argument("--dump")
     ap.add_argument("--shadow")
     ap.add_argument("--shadow-prefix", default="openwrt-shadow")
+    ap.add_argument("--retained")
     ap.add_argument("--volatile", action="append", default=["/system/uptime"])
     args = ap.parse_args()
 
@@ -73,6 +76,10 @@ def main():
     problems, notes = [], []
     if args.dump:
         new, cleared = read_dump(args.dump)
+    elif args.retained:
+        new = read_retained(args.retained, args.host)
+        new = {t: p for t, p in new.items() if p != ""}
+        cleared = {t for t in legacy if removable(t) and t not in new}
     elif args.shadow:
         raw = read_retained(args.shadow, args.host)
         prefix = args.shadow_prefix + "/"
@@ -81,7 +88,7 @@ def main():
         legacy = {t: p for t, p in legacy.items() if not t.endswith("/config")}
         cleared = set()
     else:
-        ap.error("--dump or --shadow is required")
+        ap.error("--dump, --shadow or --retained is required")
 
     for topic, old in sorted(legacy.items()):
         cur = new.get(topic)
