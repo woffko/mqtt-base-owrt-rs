@@ -33,6 +33,11 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
     for (name, iface) in ifaces {
         let inst = || Instance::named(name);
         let status = iface.get("status").and_then(Json::as_str).unwrap_or("");
+        // The rpcd plugin of mwan3 fills every number it cannot find with 0.
+        // An interface without state files reports "unknown", and mwan3 only
+        // measures latency and loss when `check_quality` is on.
+        let known = !status.is_empty() && status != "unknown";
+        let quality = iface.get("check_quality").and_then(Json::as_bool) != Some(false);
         out.push(
             &MWAN3_STATUS,
             inst(),
@@ -41,10 +46,10 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
         out.push(
             &MWAN3_ONLINE,
             inst(),
-            if status.is_empty() {
-                Reading::missing("no status")
-            } else {
+            if known {
                 Reading::Value(Value::Bool(status == "online"))
+            } else {
+                Reading::missing("mwan3 has no state for this interface")
             },
         );
         for (def, key) in [
@@ -56,7 +61,8 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
                 def,
                 inst(),
                 match int(iface, key) {
-                    Some(v) => Reading::Value(Value::Int(v)),
+                    Some(v) if known => Reading::Value(Value::Int(v)),
+                    Some(_) => Reading::missing("mwan3 has no state for this interface"),
                     None => Reading::missing(format!("no {key} value")),
                 },
             );
@@ -71,11 +77,20 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
                 continue;
             };
             let tinst = || Instance::named(name).with_sub(ip);
+            let st = track
+                .get("status")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string();
+            let measured = quality && st != "unknown";
             for (def, key) in [
                 (&MWAN3_TRACK_LATENCY, "latency"),
                 (&MWAN3_TRACK_LOSS, "packetloss"),
             ] {
                 let reading = match int(track, key) {
+                    _ if !measured => Reading::missing(
+                        "mwan3 does not measure this target (check_quality is off)",
+                    ),
                     // mwan3 reports 999999 ms when a target does not answer.
                     Some(v) if key == "latency" && v >= UNREACHABLE_LATENCY => {
                         Reading::missing("target does not answer")
@@ -85,11 +100,6 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
                 };
                 out.push(def, tinst(), reading);
             }
-            let st = track
-                .get("status")
-                .and_then(Json::as_str)
-                .unwrap_or("")
-                .to_string();
             out.push(
                 &MWAN3_TRACK_STATUS,
                 tinst(),
@@ -131,6 +141,61 @@ mod tests {
             .collect();
         assert_eq!(tracks.len(), 3);
         assert!(r.missing.is_empty());
+    }
+
+    #[test]
+    fn values_mwan3_does_not_have_are_unavailable_not_zero() {
+        // check_quality off (mwan3's default): no latency or loss was measured
+        // and the plugin reports 0. An interface without state files reports
+        // "unknown" with zeros everywhere.
+        let s = crate::collect::tests::Scratch::new("primary", "mwan3-zeros");
+        s.write(
+            "mwan3_status.json",
+            &serde_json::json!({ "interfaces": {
+                "wan": { "status": "online", "score": 8, "lost": 0, "online": 100, "check_quality": false,
+                    "track_ip": [ { "ip": "192.0.2.1", "status": "up", "latency": 0, "packetloss": 0 } ] },
+                "wanc": { "status": "unknown", "score": 0, "lost": 0, "online": 0,
+                    "track_ip": [ { "ip": "192.0.2.2", "status": "unknown", "latency": 0, "packetloss": 0 } ] }
+            } })
+            .to_string(),
+        );
+        let r = run(
+            Group::Mwan3,
+            &s.source,
+            &Config::default(),
+            &mut CollectorState::default(),
+            0.0,
+        );
+        let unavailable = |id: &str, name: &str, sub: &str| {
+            matches!(
+                value_of(&r, id, name, sub),
+                Some(Reading::Unavailable {
+                    permanent: false,
+                    ..
+                })
+            )
+        };
+        // The interface itself is measured; the targets are not.
+        assert_eq!(
+            value_of(&r, "mwan3.score", "wan", ""),
+            Some(Reading::Value(Value::Int(8)))
+        );
+        assert!(unavailable("mwan3.track_latency", "wan", "192.0.2.1"));
+        assert!(unavailable("mwan3.track_loss", "wan", "192.0.2.1"));
+        // No state at all: nothing is 0, nothing is offline.
+        for id in [
+            "mwan3.online",
+            "mwan3.score",
+            "mwan3.lost",
+            "mwan3.online_time",
+        ] {
+            assert!(unavailable(id, "wanc", ""), "{id}");
+        }
+        assert!(unavailable("mwan3.track_latency", "wanc", "192.0.2.2"));
+        assert_eq!(
+            value_of(&r, "mwan3.status", "wanc", ""),
+            Some(Reading::text("unknown"))
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@
 
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,9 @@ impl Output {
 }
 
 const POLL_STEP: Duration = Duration::from_millis(10);
+/// How long the output may take to end after the child has exited. A process
+/// the child left behind can keep the pipe open.
+const OUTPUT_GRACE: Duration = Duration::from_secs(2);
 
 /// Run `program args`, feed `stdin` if given, and collect at most
 /// `max_output` bytes of stdout. Stderr is discarded. The child is killed when
@@ -33,6 +37,17 @@ pub fn run(
     stdin: Option<&[u8]>,
     timeout: Duration,
     max_output: usize,
+) -> io::Result<Output> {
+    run_with_grace(program, args, stdin, timeout, max_output, OUTPUT_GRACE)
+}
+
+fn run_with_grace(
+    program: &str,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    max_output: usize,
+    grace: Duration,
 ) -> io::Result<Output> {
     let mut child = Command::new(program)
         .args(args)
@@ -58,8 +73,12 @@ pub fn run(
     };
 
     let deadline = Instant::now() + timeout;
-    thread::scope(|scope| {
-        let reader = scope.spawn(move || {
+    let (sender, receiver) = mpsc::channel();
+    // A thread that cannot be started is an error, not a panic (the release
+    // build aborts on panic), and it must not leave the child running.
+    let spawned = thread::Builder::new()
+        .name("exec-reader".to_string())
+        .spawn(move || {
             let mut buf = Vec::with_capacity(max_output.min(64 * 1024));
             let mut chunk = [0u8; 8192];
             let mut truncated = false;
@@ -77,35 +96,41 @@ pub fn run(
                     Err(_) => break,
                 }
             }
-            (buf, truncated)
+            let _ = sender.send((buf, truncated));
         });
+    if let Err(e) = spawned {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(e);
+    }
 
-        let status = loop {
-            match child.try_wait()? {
-                Some(status) => break Some(status),
-                None if Instant::now() >= deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break None;
-                }
-                None => thread::sleep(POLL_STEP),
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break Some(status),
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
             }
-        };
-        let (stdout, truncated) = reader
-            .join()
-            .map_err(|_| io::Error::other("output reader failed"))?;
-        match status {
-            Some(status) => Ok(Output {
+            None => thread::sleep(POLL_STEP),
+        }
+    };
+    match status {
+        Some(status) => {
+            let (stdout, truncated) = receiver
+                .recv_timeout(grace)
+                .map_err(|_| io::Error::other("the output of the helper did not end"))?;
+            Ok(Output {
                 code: status.code(),
                 stdout,
                 truncated,
-            }),
-            None => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!("{program} did not finish within {} s", timeout.as_secs()),
-            )),
+            })
         }
-    })
+        None => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("{program} did not finish within {} s", timeout.as_secs()),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +171,23 @@ mod tests {
         .unwrap();
         assert_eq!(out.stdout.len(), 1000);
         assert!(out.truncated);
+    }
+
+    #[test]
+    fn a_process_left_behind_does_not_hold_the_caller() {
+        // The shell exits at once; the background sleep keeps the pipe open.
+        let started = Instant::now();
+        let err = run_with_grace(
+            "sh",
+            &["-c", "sleep 5 & echo hi"],
+            None,
+            Duration::from_secs(5),
+            1024,
+            Duration::from_millis(200),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("did not end"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]

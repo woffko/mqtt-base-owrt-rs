@@ -87,3 +87,29 @@ Details and evidence: `docs/evidence/audit-2026-09-29.md`.
   refuses what only the shell can evaluate.
 - LuCI: Reset to legacy defaults redraws every section; CPU and rate rows
   show the last value.
+
+Found by the independent review of the same commit:
+
+- A group whose source fails or is missing at a pass is read again at its
+  interval instead of being dropped from the schedule; a full pass no longer
+  removes the entities of a group that failed at that moment, and an entity
+  removed by a full pass is announced again when it returns.
+- Only groups with a metric switched on are read, so the default install no
+  longer runs `apk list --upgradable` or queries `keepalived` at every
+  connect.
+- Topics cleared by a pass stay in `state.json` until the broker has
+  acknowledged the batch, so a connection lost in between cannot orphan
+  them.
+- A malformed TLS key file no longer puts the key into the error message.
+- The Metrics page shows the stored settings when the configuration has an
+  error (it used to show defaults, and Save deleted every override); the
+  Broker and Metrics forms reject the values the daemon refuses (port 0,
+  decimal keepalive, names over 128 bytes).
+- `set_password` without a password argument is an error instead of
+  deleting the stored password; the legacy import reads `export` lines and
+  refuses assignments it cannot read instead of deleting the password.
+- No more `Unknown Model`, `Unknown Platform` and `Unknown Version`
+  placeholders; mwan3 zeros (no quality checks, no state), an empty package
+  index and a stopped service are reported as what they are.
+- `status.json` stays current while the service waits to reconnect; a
+  helper that leaves a process behind cannot hold the service up.

@@ -47,6 +47,16 @@ its own entity.
     away. The next successful read replaces it;
   - the value **cannot exist** on this router (see below): it is not
     announced at all.
+- Some sources answer with a number where they have no value. These are
+  treated as absent values, not published:
+  - `mwan3` reports 0 for the latency and loss of a target when
+    `check_quality` is off (its default), and 0 for every number of an
+    interface without state (`status` is `unknown`);
+  - `apk list --upgradable` prints nothing while no package index is cached
+    (the cache is empty after every boot until `apk update`), so the count of
+    upgradable packages is unavailable, not 0.
+- A procd service that is stopped is no longer in procd's list; its
+  `service.running` reads OFF.
 - Timestamps (`system.boot_time`) are RFC 3339 in UTC.
 
 Discovery configs contain every field the legacy script sent, with the same

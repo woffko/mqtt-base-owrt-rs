@@ -38,7 +38,9 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
     };
     for name in &ctx.cfg.select.services {
         let reading = match list.get(name.as_str()) {
-            None => Reading::missing("service is not registered with procd"),
+            // `/etc/init.d/<name> stop` removes the service from procd's list,
+            // so a service that is not listed is not running.
+            None => Reading::Value(Value::Bool(false)),
             Some(svc) => {
                 let instances = svc.get("instances").and_then(Json::as_object);
                 match instances {
@@ -81,9 +83,10 @@ mod tests {
             value_of(&r, "service.running", "adblock", ""),
             Some(Reading::Value(Value::Bool(false)))
         );
-        assert!(matches!(
+        // A stopped service is gone from procd's list: it is not running.
+        assert_eq!(
             value_of(&r, "service.running", "nonexistent", ""),
-            Some(Reading::Unavailable { .. })
-        ));
+            Some(Reading::Value(Value::Bool(false)))
+        );
     }
 }
