@@ -123,3 +123,31 @@ fn unverified_mode_accepts_self_signed() {
         .expect("TLS connect")
         .disconnect();
 }
+
+#[test]
+fn a_malformed_key_file_is_never_quoted_in_the_error() {
+    // The PEM parser quotes the line it rejects. When the header shares a
+    // line with the key, that line is the key.
+    let s = server();
+    let pair = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+    let secret = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgKEYMATERIAL";
+    let settings = TlsSettings {
+        ca_file: None,
+        verify: false,
+        cert_file: Some(ca_file(&pair.cert.pem(), "client-cert")),
+        key_file: Some(ca_file(
+            &format!("-----BEGIN PRIVATE KEY----- {secret}\n-----END PRIVATE KEY-----\n"),
+            "client-key",
+        )),
+    };
+    let err = Client::connect(&options(s.port, settings))
+        .err()
+        .expect("must fail");
+    let text = err.to_string();
+    assert!(text.contains("client-key"), "{text}");
+    // The parser prints the rejected line as a list of byte values.
+    assert!(
+        text.ends_with("not a valid PEM private key"),
+        "the error may quote the key: {text}"
+    );
+}

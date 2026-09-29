@@ -106,7 +106,7 @@ mod tls {
 
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
-    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::pem::{Error as PemError, PemObject};
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
     use rustls::{
         ClientConfig, ClientConnection, DigitallySignedStruct, RootCertStore, SignatureScheme,
@@ -117,6 +117,18 @@ mod tls {
 
     fn invalid(what: String) -> io::Error {
         io::Error::new(io::ErrorKind::InvalidInput, what)
+    }
+
+    /// The PEM parser quotes the line it rejects; in a key file that line can
+    /// be the key. Errors end up in the log, the status file and LuCI, so
+    /// only the kind of failure is reported.
+    fn pem_error(path: &str, what: &str, e: &PemError) -> io::Error {
+        let reason = match e {
+            PemError::Io(e) => e.to_string(),
+            PemError::NoItemsFound => format!("no {what} found"),
+            _ => format!("not a valid PEM {what}"),
+        };
+        invalid(format!("{path}: {reason}"))
     }
 
     /// Accepts any server certificate but still checks handshake signatures.
@@ -170,9 +182,9 @@ mod tls {
 
     fn certificates(path: &str) -> io::Result<Vec<CertificateDer<'static>>> {
         let certs: Result<Vec<_>, _> = CertificateDer::pem_file_iter(path)
-            .map_err(|e| invalid(format!("{path}: {e}")))?
+            .map_err(|e| pem_error(path, "certificate", &e))?
             .collect();
-        let certs = certs.map_err(|e| invalid(format!("{path}: {e}")))?;
+        let certs = certs.map_err(|e| pem_error(path, "certificate", &e))?;
         if certs.is_empty() {
             return Err(invalid(format!("{path}: no certificate found")));
         }
@@ -200,7 +212,7 @@ mod tls {
         let config = match (&s.cert_file, &s.key_file) {
             (Some(cert), Some(key)) => {
                 let key = PrivateKeyDer::from_pem_file(key)
-                    .map_err(|e| invalid(format!("{key}: {e}")))?;
+                    .map_err(|e| pem_error(key, "private key", &e))?;
                 builder
                     .with_client_auth_cert(certificates(cert)?, key)
                     .map_err(|e| invalid(e.to_string()))?

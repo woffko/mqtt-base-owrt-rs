@@ -7,6 +7,9 @@ cd "$REPO/package/mqtt-metrics/src"
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --quiet
+# The package is built with TLS (ADR-0005): check that feature set as well.
+cargo clippy --all-targets --features tls -- -D warnings
+cargo test --quiet --features tls
 
 cd "$REPO/package/luci-app-mqtt-metrics"
 for f in htdocs/luci-static/resources/mqtt-metrics/*.js htdocs/luci-static/resources/view/mqtt-metrics/*.js; do
