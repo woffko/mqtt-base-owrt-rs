@@ -6,21 +6,25 @@
 // Functions without DOM or RPC access are unit-tested in
 // tests/common.test.js.
 
-var callStatus = rpc.declare({ object: 'mqtt-metrics', method: 'status' });
-var callCatalog = rpc.declare({ object: 'mqtt-metrics', method: 'catalog' });
-var callPreview = rpc.declare({ object: 'mqtt-metrics', method: 'preview', params: [ 'key' ] });
-var callLegacy = rpc.declare({ object: 'mqtt-metrics', method: 'legacy' });
-var callLog = rpc.declare({ object: 'mqtt-metrics', method: 'log' });
+// `reject: true`: a failed call (rpcd without the plugin, a timeout) rejects.
+// Without it rpc.js resolves the bare ubus status code, and the views would
+// show that number as if it were the reply.
+var callStatus = rpc.declare({ object: 'mqtt-metrics', method: 'status', reject: true });
+var callCatalog = rpc.declare({ object: 'mqtt-metrics', method: 'catalog', reject: true });
+var callPreview = rpc.declare({ object: 'mqtt-metrics', method: 'preview', params: [ 'key' ], reject: true });
+var callLegacy = rpc.declare({ object: 'mqtt-metrics', method: 'legacy', reject: true });
+var callLog = rpc.declare({ object: 'mqtt-metrics', method: 'log', reject: true });
 var callTest = rpc.declare({
 	object: 'mqtt-metrics',
 	method: 'test_connection',
-	params: [ 'host', 'port', 'username', 'password', 'keep_password', 'tls', 'tls_verify' ]
+	params: [ 'host', 'port', 'username', 'password', 'keep_password', 'tls', 'tls_verify' ],
+	reject: true
 });
-var callSetPassword = rpc.declare({ object: 'mqtt-metrics', method: 'set_password', params: [ 'password' ] });
-var callImportLegacy = rpc.declare({ object: 'mqtt-metrics', method: 'import_legacy' });
-var callRepublish = rpc.declare({ object: 'mqtt-metrics', method: 'republish' });
-var callPurge = rpc.declare({ object: 'mqtt-metrics', method: 'purge' });
-var callReload = rpc.declare({ object: 'mqtt-metrics', method: 'reload' });
+var callSetPassword = rpc.declare({ object: 'mqtt-metrics', method: 'set_password', params: [ 'password' ], reject: true });
+var callImportLegacy = rpc.declare({ object: 'mqtt-metrics', method: 'import_legacy', reject: true });
+var callRepublish = rpc.declare({ object: 'mqtt-metrics', method: 'republish', reject: true });
+var callPurge = rpc.declare({ object: 'mqtt-metrics', method: 'purge', reject: true });
+var callReload = rpc.declare({ object: 'mqtt-metrics', method: 'reload', reject: true });
 
 var BOOL_FIELDS = [ 'publish', 'discovery', 'ha_enabled', 'diagnostic' ];
 var TEXT_FIELDS = [ 'name', 'object_id', 'topic', 'icon' ];

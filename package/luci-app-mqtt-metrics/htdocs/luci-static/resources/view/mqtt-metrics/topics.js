@@ -31,7 +31,7 @@ return view.extend({
 			_('Defaults reproduce the legacy publish_metrics.sh script, so existing Home Assistant entities keep their history.'));
 
 		var warning = E('div', { 'class': 'alert-message warning', 'style': 'display:none' }, [
-			mm.text(_('The base topic, node, discovery prefix or device ID changed. Saving creates new Home Assistant entities; their history does not carry over. The old entities and retained topics are removed automatically.'))
+			mm.text(_('The base topic, node, discovery prefix or device ID changed. A new device ID creates new Home Assistant entities; their history does not carry over. A new base topic or node moves the state topics: anything else that reads the old topics must be updated. Home Assistant has to listen on the discovery prefix. The old retained topics are removed automatically.'))
 		]);
 		var updateWarning = function() {
 			var after = {};

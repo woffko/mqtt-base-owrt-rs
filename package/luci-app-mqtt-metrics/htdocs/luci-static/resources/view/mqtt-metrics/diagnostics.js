@@ -68,6 +68,8 @@ return view.extend({
 							dom.content(out, mm.text(res.error ? res.error :
 								_('Topic') + ': ' + res.config_topic + '\n' + _('State topic') + ': ' + res.state_topic + '\n' +
 								_('Announced') + ': ' + (res.announced ? _('yes') : _('no')) + '\n\n' + JSON.stringify(res.payload, null, 2)));
+						}).catch(function(err) {
+							dom.content(out, mm.text(String(err)));
 						});
 					})
 				}, [ mm.text(_('Show')) ])
@@ -117,6 +119,8 @@ return view.extend({
 				'click': ui.createHandlerFn(this, function() {
 					return mm.callLog().then(function(l) {
 						dom.content(box, mm.text(l.error ? l.error : (newestFirst(l) || _('No log lines.'))));
+					}).catch(function(err) {
+						dom.content(box, mm.text(String(err)));
 					});
 				})
 			}, [ mm.text(_('Refresh')) ]),

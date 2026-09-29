@@ -182,7 +182,10 @@ return view.extend({
 		var preview = E('pre', { 'style': 'display:none;white-space:pre-wrap;word-break:break-all;max-height:20em;overflow:auto' });
 		return E('div', { 'style': 'padding:.5em 0 .5em 1em' }, [
 			E('div', { 'style': 'display:grid;grid-template-columns:minmax(8em,auto) 1fr;gap:.3em .8em;align-items:center' }, [
-				mm.text(_('Object ID')), input(d.object_id, def.object_id, function(v) { d.object_id = v; }),
+				mm.text(_('Object ID')), E('div', {}, [
+					input(d.object_id, def.object_id, function(v) { d.object_id = v; }),
+					E('div', { 'style': 'opacity:.7' }, [ E('small', {}, [ mm.text(_('A new object ID creates a new Home Assistant entity; the history of the old one does not carry over.')) ]) ])
+				]),
 				mm.text(_('Topic suffix')), input(d.topic, def.topic, function(v) { d.topic = v; }),
 				mm.text(_('Icon')), input(d.icon, def.icon || 'mdi:...', function(v) { d.icon = v; }),
 				mm.text(_('Unique ID')), E('code', {}, [ mm.text(m.unique_id) ]),
@@ -195,6 +198,9 @@ return view.extend({
 					return mm.callPreview(m.key).then(function(res) {
 						preview.style.display = '';
 						dom.content(preview, mm.text(res.error ? res.error : (res.config_topic + '\n' + JSON.stringify(res.payload, null, 2))));
+					}).catch(function(err) {
+						preview.style.display = '';
+						dom.content(preview, mm.text(String(err)));
 					});
 				})
 			]),

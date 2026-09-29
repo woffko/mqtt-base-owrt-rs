@@ -56,10 +56,13 @@ The password is copied on the router and not shown.
 | Configuration URL | empty | Link on the Home Assistant device page. |
 | Remove legacy leftovers | on | See below. |
 
-Changing the base topic, node, discovery prefix or device ID creates new
-entities in Home Assistant; their history does not carry over. The page
-shows a warning as soon as one of these fields changes. The old entities and
-retained topics are removed automatically.
+The device ID (and an object ID changed on the Metrics page) is part of the
+`unique_id` of an entity. Changing it creates new entities in Home Assistant;
+their history does not carry over. Changing the base topic or node moves the
+state topics: the entities are updated in place, but anything else that
+reads the old topics must follow. Home Assistant has to listen on the
+discovery prefix. The Topics page shows a warning as soon as one of these
+fields changes, and the old retained topics are removed automatically.
 
 **Remove legacy leftovers**: on the first pass with discovery on, the
 service adopts the legacy script's topics for this router and clears every
@@ -79,10 +82,10 @@ adoption happens on the first pass after the cron line is removed.
 - **Publish only changes**: values are still read at their interval but
   sent only when they change, and at least once per **Maximum age**.
 
-A group is read as often as its shortest interval. A metric with a longer
-interval is published at the first read after that interval has passed, so it
-is effectively rounded up to a multiple of the group's shortest interval (with
-60 s and 90 s in one group, the 90 s metric is published every 120 s).
+Every metric is published at its own interval. A group is read whenever its
+earliest metric is due; the other metrics of the group wait for their turn
+(with 60 s and 90 s in one group, the group is read at 60 s, 90 s, 120 s and
+so on, and each metric is published at its own multiples).
 
 A group is read only when something in it is published: a metric that is on
 by default, or one that you switched on. Groups you do not use cost nothing
