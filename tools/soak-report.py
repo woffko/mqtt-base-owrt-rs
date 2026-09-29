@@ -15,7 +15,10 @@ def main():
     ap.add_argument("csv")
     ap.add_argument("--clock-ticks", type=int, default=100)
     args = ap.parse_args()
-    rows = [r for r in csv.DictReader(open(args.csv)) if r["pid"]]
+    samples = list(csv.DictReader(open(args.csv)))
+    # A sample without a pid was taken while the daemon was not running.
+    down = [r for r in samples if not r["pid"]]
+    rows = [r for r in samples if r["pid"]]
     if len(rows) < 2:
         print("not enough samples")
         return 1
@@ -32,7 +35,10 @@ def main():
         cpu_pct = dticks / args.clock_ticks / dt * 100 if dt else 0.0
     perr = int(rows[-1]["publish_errors"] or 0) - int(rows[0]["publish_errors"] or 0)
     reco = int(rows[-1]["reconnects"] or 0) - int(rows[0]["reconnects"] or 0)
-    problems = sum(int(r["log_problems"] or 0) for r in rows[1:])
+    # The monitor records the change of a count taken over the bounded system
+    # log; lines that age out make the change negative, and must not cancel
+    # the lines that were added.
+    problems = sum(max(0, int(r["log_problems"] or 0)) for r in samples[1:])
     states = sorted({r["state"] for r in rows})
     growth = (warm[-1] - warm[0]) / warm[0] * 100 if warm and warm[0] else 0.0
 
@@ -43,7 +49,15 @@ def main():
     print("CPU: %.3f %% of one core on average" % cpu_pct)
     print("messages: %s -> %s" % (rows[0]["messages"], rows[-1]["messages"]))
     print("publish errors: %d, reconnects: %d, warning/error log lines: %d" % (perr, reco, problems))
-    ok = len(pids) == 1 and perr == 0 and problems == 0 and growth < 10 and states == ["connected"]
+    print("samples without a running daemon: %d" % len(down))
+    ok = (
+        len(pids) == 1
+        and not down
+        and perr == 0
+        and problems == 0
+        and growth < 10
+        and states == ["connected"]
+    )
     print("RESULT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 

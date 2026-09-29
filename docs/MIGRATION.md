@@ -59,14 +59,17 @@ mosquitto_sub -h <broker> -u <user> -P <password> -v -t 'openwrt-shadow/#' -W 5
 Compare the shadow states with the legacy states from a workstation:
 
 ```sh
+mqtt-metricsd --dump > dump.jsonl        # on the router; copy the file over
 tools/parity-check.py --legacy legacy.txt --shadow shadow.txt \
-    --shadow-prefix openwrt-shadow --host <hostname>
+    --shadow-prefix openwrt-shadow --removed dump.jsonl --host <hostname>
 ```
 
 `legacy.txt` and `shadow.txt` are `mosquitto_sub -v` captures of
-`openwrt/#` and `openwrt-shadow/#`. The only expected differences are the
-documented fixes in [TOPICS.md](TOPICS.md) and changing values such as
-`system/uptime`.
+`openwrt/#` and `openwrt-shadow/#`. `dump.jsonl` is what the service would
+publish; its empty messages are the removals it makes on purpose (see
+[TOPICS.md](TOPICS.md)). Any other legacy topic missing from the shadow
+capture is reported. The only other expected differences are changing values
+such as `system/uptime`.
 
 ## 2. Back up
 
@@ -85,7 +88,7 @@ the daemon removes on its first production pass:
 ```sh
 sed -i '\|/usr/bin/publish_metrics.sh|d' /etc/crontabs/root
 /etc/init.d/cron restart
-while pgrep -f publish_metrics.sh >/dev/null; do sleep 1; done
+while pgrep -f '[p]ublish_metrics.sh' >/dev/null; do sleep 1; done
 uci set mqtt-metrics.identity.base_topic='openwrt'
 uci set mqtt-metrics.identity.discovery='1'
 uci commit mqtt-metrics

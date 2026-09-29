@@ -2,7 +2,7 @@
 """Compare the legacy script's retained topics with mqtt-metrics output.
 
 Usage:
-  parity-check.py --legacy LEGACY.txt --host HOSTNAME (--dump DUMP.jsonl | --shadow SHADOW.txt --shadow-prefix PREFIX | --retained AFTER.txt)
+  parity-check.py --legacy LEGACY.txt --host HOSTNAME (--dump DUMP.jsonl | --shadow SHADOW.txt --shadow-prefix PREFIX --removed DUMP.jsonl | --retained AFTER.txt --removed DUMP.jsonl)
 
 LEGACY.txt and SHADOW.txt are `mosquitto_sub -v` captures ("topic payload"
 per line). DUMP.jsonl is the output of `mqtt-metricsd --dump`, which is what
@@ -10,7 +10,10 @@ the daemon would publish with the legacy-compatible defaults. In shadow mode
 only state topics are compared, after mapping PREFIX/<host> to
 openwrt/<host>. --retained compares a capture of the production topics
 taken after the cutover (states and discovery configs); documented
-removals must be absent from it.
+removals must be absent from it. In both of those modes --removed names the
+DUMP.jsonl of `mqtt-metricsd --dump` from the same router: its topics with an
+empty payload are the removals the daemon makes on purpose. A legacy topic
+that is missing from the capture and not in that list is a difference.
 
 Allowed differences (documented in docs/TOPICS.md):
 - legacy entities that can never have a value are cleared by mqtt-metrics;
@@ -23,8 +26,6 @@ Exit status 0 means no unexpected difference.
 import argparse
 import json
 import sys
-
-REMOVABLE = ("ipv4", "ipv6", "gateway4", "gateway6")
 
 
 def read_retained(path, host):
@@ -55,12 +56,6 @@ def read_dump(path):
     return published, cleared
 
 
-def removable(topic):
-    last = topic.rstrip("/").split("/")
-    field = last[-2] if last[-1] == "config" else last[-1]
-    return any(field.endswith(f) for f in REMOVABLE)
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--legacy", required=True)
@@ -69,31 +64,36 @@ def main():
     ap.add_argument("--shadow")
     ap.add_argument("--shadow-prefix", default="openwrt-shadow")
     ap.add_argument("--retained")
+    ap.add_argument("--removed", help="mqtt-metricsd --dump output naming the removals made on purpose")
     ap.add_argument("--volatile", action="append", default=["/system/uptime"])
     args = ap.parse_args()
 
     legacy = read_retained(args.legacy, args.host)
     problems, notes = [], []
+    if (args.shadow or args.retained) and not args.removed:
+        ap.error("--shadow and --retained need --removed DUMP.jsonl")
+    # Removals the daemon makes on purpose, from its own dry run.
+    intended = read_dump(args.removed)[1] if args.removed else set()
     if args.dump:
         new, cleared = read_dump(args.dump)
     elif args.retained:
         new = read_retained(args.retained, args.host)
         new = {t: p for t, p in new.items() if p != ""}
-        cleared = {t for t in legacy if removable(t) and t not in new}
+        cleared = intended
     elif args.shadow:
         raw = read_retained(args.shadow, args.host)
         prefix = args.shadow_prefix + "/"
         new = {"openwrt/" + t[len(prefix):]: p for t, p in raw.items() if t.startswith(prefix)}
         new.pop("openwrt/%s/availability" % args.host, None)
         legacy = {t: p for t, p in legacy.items() if not t.endswith("/config")}
-        cleared = set()
+        cleared = intended
     else:
         ap.error("--dump, --shadow or --retained is required")
 
     for topic, old in sorted(legacy.items()):
         cur = new.get(topic)
         if cur is None:
-            if removable(topic) and (args.shadow or topic in cleared):
+            if topic in cleared:
                 notes.append("removed (documented): %s" % topic)
             else:
                 problems.append("missing: %s" % topic)

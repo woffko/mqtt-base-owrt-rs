@@ -100,6 +100,9 @@ fs.mkdirSync(out, { recursive: true, mode: 0o700 });
 	console.log(JSON.stringify({ out, shots: report.shots.length, errors: report.errors, console: report.console, blocked: report.blocked.length }, null, 2));
 	process.exit(report.errors.length ? 1 : 0);
 })().catch((e) => {
-	console.error(e);
+	// Playwright quotes the value given to fill() in its error text, and the
+	// router password must not reach a terminal or a log.
+	const text = String((e && e.stack) || e);
+	console.error(password ? text.split(password).join('***') : text);
 	process.exit(1);
 });

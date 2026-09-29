@@ -9,8 +9,15 @@
 // Writes are limited to the mqtt-metrics UCI config and the rpcd methods
 // reload/republish; set_password, import_legacy and purge are blocked.
 //
+// It changes the router's configuration: the edit phase sets the keepalive,
+// QoS, device name and model, publish interval, a hidden metric and a
+// service, and the reset phase resets only the Metrics page, so the Broker and
+// Topics edits stay. Run it on a test router, or take `uci export
+// mqtt-metrics` first. It refuses to run unless LUCI_ROUNDTRIP_CONFIRM is set
+// to the router address.
+//
 // Password: stdin. Usage:
-//   node tools/luci-roundtrip.browser.js <router> <phase: edit|reset> <out-dir>
+//   LUCI_ROUNDTRIP_CONFIRM=<router> node tools/luci-roundtrip.browser.js <router> <phase: edit|reset> <out-dir>
 const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('/home/w0w/.local/share/playwright/node_modules/playwright');
@@ -18,6 +25,10 @@ const { chromium } = require('/home/w0w/.local/share/playwright/node_modules/pla
 const [ host, phase, out ] = process.argv.slice(2);
 if (!host || ![ 'edit', 'reset' ].includes(phase) || !out) {
 	console.error('usage: luci-roundtrip.browser.js <router> edit|reset <out-dir>');
+	process.exit(2);
+}
+if (process.env.LUCI_ROUNDTRIP_CONFIRM !== host) {
+	console.error('this changes the configuration of ' + host + '; set LUCI_ROUNDTRIP_CONFIRM=' + host + ' to run it');
 	process.exit(2);
 }
 const password = fs.readFileSync(0, 'utf8').replace(/[\r\n]+$/, '');
@@ -123,6 +134,9 @@ async function row(page, key) {
 	console.log(JSON.stringify(report, null, 2));
 	process.exit(report.errors.length ? 1 : 0);
 })().catch((e) => {
-	console.error(e);
+	// Playwright quotes the value given to fill() in its error text, and the
+	// router password must not reach a terminal or a log.
+	const text = String((e && e.stack) || e);
+	console.error(password ? text.split(password).join('***') : text);
 	process.exit(1);
 });

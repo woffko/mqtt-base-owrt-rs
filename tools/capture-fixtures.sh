@@ -7,7 +7,18 @@ set -eu
 
 host=$1
 out=$2
+# The capture holds what the sanitizer removes later (the PPPoE password,
+# WireGuard keys): keep it private, and refuse a place inside the repository.
+umask 077
+repo=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$out"
+chmod 700 "$out"
+case "$(cd "$out" && pwd)/" in
+"$repo"/*)
+	echo "$out is inside the repository; use a directory outside it" >&2
+	exit 2
+	;;
+esac
 
 sshpass -e ssh -o ConnectTimeout=10 "root@$host" '
 set -u
@@ -39,5 +50,5 @@ cat /lib/functions/network.sh > network.sh
 df -k / /tmp > df 2>/dev/null || true
 tar -cf - .
 cd / && rm -rf "$d"
-' | tar -xmf - -C "$out"
+' | tar --no-overwrite-dir -xmf - -C "$out"
 echo "captured $(ls "$out" | wc -l) files from $host into $out"

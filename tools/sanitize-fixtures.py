@@ -29,7 +29,7 @@ SKIP_FILES = {"network.sh"}
 IPV4_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w.])")
 IPV6_RE = re.compile(r"(?<![\w:])([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?![\w:])")
 MAC_RE = re.compile(r"\b([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\b")
-WG_KEY_RE = re.compile(r"\b[A-Za-z0-9+/]{43}=")
+WG_KEY_RE = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{43}=")
 
 
 class Mapper:

@@ -78,7 +78,11 @@ backup)
 	ssh_ '
 	set -e
 	BACKUP=/root/mqtt-metrics-migration
-	if [ -d $BACKUP ]; then echo "backup exists, kept:"; ls -l $BACKUP; exit 0; fi
+	if [ -d $BACKUP ]; then
+		# A backup that was interrupted has no checksums and cannot be used.
+		[ -f $BACKUP/MD5SUMS ] || { echo "$BACKUP is incomplete; remove it and run the backup step again" >&2; exit 1; }
+		echo "backup exists, kept:"; ls -l $BACKUP; exit 0
+	fi
 	mkdir -p $BACKUP; chmod 700 $BACKUP
 	cp -p /etc/rc.local /etc/crontabs/root /usr/bin/publish_metrics.sh /etc/config/mqtt-metrics $BACKUP/
 	(cd $BACKUP && md5sum rc.local root publish_metrics.sh mqtt-metrics > MD5SUMS)
@@ -94,7 +98,9 @@ switch)
 	remove_cron_line /etc/crontabs/root
 	/etc/init.d/cron restart
 	n=0
-	while pgrep -f publish_metrics.sh >/dev/null && [ $n -lt 60 ]; do sleep 1; n=$((n + 1)); done
+	# [p]: the pattern must not match this shell, whose command line contains it.
+	while pgrep -f "[p]ublish_metrics.sh" >/dev/null && [ $n -lt 60 ]; do sleep 1; n=$((n + 1)); done
+	if pgrep -f "[p]ublish_metrics.sh" >/dev/null; then echo "the legacy script is still running after 60 s" >&2; exit 1; fi
 	uci set mqtt-metrics.identity.base_topic="openwrt"
 	uci set mqtt-metrics.identity.discovery="1"
 	for o in discovery_prefix device_id birth_topic node; do uci -q delete mqtt-metrics.identity.$o || true; done
