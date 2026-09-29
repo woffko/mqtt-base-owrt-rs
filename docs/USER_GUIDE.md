@@ -84,10 +84,12 @@ interval is published at the first read after that interval has passed, so it
 is effectively rounded up to a multiple of the group's shortest interval (with
 60 s and 90 s in one group, the 90 s metric is published every 120 s).
 
-A group whose source is missing or fails at a read (`mwan3` not running yet,
-`ubus` answering with an error) is read again at its interval, so its metrics
-appear as soon as the source does. Values published earlier stay in place
-while a read fails.
+A group is read only when something in it is published: a metric that is on
+by default, or one that you switched on. Groups you do not use cost nothing
+(no `apk` run, no `keepalived` query). A group whose source is missing or
+fails at a read (`mwan3` not running yet, `ubus` answering with an error) is
+read again at its interval, so its metrics appear as soon as the source does.
+Values published earlier stay in place while a read fails.
 
 ### Selection
 
@@ -162,6 +164,11 @@ once.
 
 `uci commit` from the command line does not notify procd; run
 `/etc/init.d/mqtt-metrics reload` afterwards. LuCI does this automatically.
+
+A configuration with an error (for example a metric name longer than 128
+bytes set with `uci`) stops publishing until it is fixed. The Status page and
+`mqtt-metricsd --check-config` list the errors, and the LuCI pages keep
+showing the stored settings that could be read.
 
 ## Files
 

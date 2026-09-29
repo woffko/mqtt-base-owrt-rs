@@ -341,6 +341,10 @@ pub struct Engine {
     next_due: BTreeMap<Group, f64>,
     topics: TopicState,
     topics_dirty: bool,
+    /// The topics wanted after the last pass, while the clears of that pass
+    /// are not confirmed. Until then the ledger keeps the topics that were
+    /// cleared, so that a batch lost with the connection is issued again.
+    unsettled: Option<BTreeSet<String>>,
 }
 
 /// Slack so that a round collected slightly early still publishes.
@@ -358,6 +362,7 @@ impl Engine {
             next_due: BTreeMap::new(),
             topics,
             topics_dirty: false,
+            unsettled: None,
         }
     }
 
@@ -408,12 +413,40 @@ impl Engine {
         &self.missing
     }
 
+    /// Groups that are read: enabled ones with at least one metric switched
+    /// on. A group nothing is published from is not collected at all, so its
+    /// helpers (`apk`, the `keepalived` dump) do not run for nothing.
     fn enabled_groups(&self) -> Vec<Group> {
         Group::ALL
             .iter()
             .copied()
-            .filter(|g| self.cfg.group(*g).enabled)
+            .filter(|g| {
+                self.cfg.group(*g).enabled
+                    && catalog::ALL
+                        .iter()
+                        .copied()
+                        .filter(|def| def.group == *g)
+                        .any(|def| self.switched_on(def, true).next().is_some())
+            })
             .collect()
+    }
+
+    /// Intervals of the metrics made from `def` that are switched on: the
+    /// template itself when it is on by default (and `by_default` is set),
+    /// and every override that enables a key the template can produce.
+    fn switched_on(
+        &self,
+        def: &'static MetricDef,
+        by_default: bool,
+    ) -> impl Iterator<Item = u32> + '_ {
+        let default = (by_default && def.legacy).then(|| interval_for(&self.cfg, def, None));
+        let overridden = self
+            .cfg
+            .metrics
+            .iter()
+            .filter(move |(key, over)| over.publish == Some(true) && key_fits(def.object, key))
+            .map(move |(_, over)| interval_for(&self.cfg, def, over.interval));
+        default.into_iter().chain(overridden)
     }
 
     fn clear(&self, topic: &str) -> Publication {
@@ -441,25 +474,15 @@ impl Engine {
     /// worth reading when a template that is on by default has no entry (its
     /// source is absent or failed) or when an override switches on a metric
     /// of an instance that is not there, so that the metric comes back when
-    /// its source does.
+    /// its source does. A template whose entries exist but are all switched
+    /// off by the user does not count.
     fn idle_interval(&self, group: Group) -> Option<u32> {
+        let has_entry = |id: &str| self.entries.values().any(|e| e.def.id == id);
         catalog::ALL
             .iter()
             .copied()
             .filter(|def| def.group == group)
-            .flat_map(|def| {
-                let by_default = (def.legacy && !self.entries.values().any(|e| e.def.id == def.id))
-                    .then(|| interval_for(&self.cfg, def, None));
-                let overridden = self
-                    .cfg
-                    .metrics
-                    .iter()
-                    .filter(move |(key, over)| {
-                        over.publish == Some(true) && key_fits(def.object, key)
-                    })
-                    .map(move |(_, over)| interval_for(&self.cfg, def, over.interval));
-                by_default.into_iter().chain(overridden)
-            })
+            .flat_map(|def| self.switched_on(def, !has_entry(def.id)))
             .min()
     }
 
@@ -620,10 +643,13 @@ impl Engine {
             self.tracks.entry(key).or_default().forget_state();
         }
 
-        if self.topics.topics != want {
-            self.topics.topics = want;
+        // The topics cleared above stay in the ledger until the daemon has
+        // delivered the batch and calls `settle`.
+        if !want.is_subset(&self.topics.topics) {
+            self.topics.topics.extend(want.iter().cloned());
             self.topics_dirty = true;
         }
+        self.unsettled = Some(want);
         self.next_due.clear();
         for group in groups {
             self.reschedule(group, mono);
@@ -752,12 +778,24 @@ impl Engine {
         out
     }
 
+    /// The clears returned by the last full pass or purge are on the broker:
+    /// the topics they removed leave the ledger. Without this call (the
+    /// connection dropped first) the next pass clears them again.
+    pub fn settle(&mut self) {
+        if let Some(want) = self.unsettled.take() {
+            if self.topics.topics != want {
+                self.topics.topics = want;
+                self.topics_dirty = true;
+            }
+        }
+    }
+
     /// Clear every retained topic this router owns, including availability.
+    /// Call `settle` once the clears are delivered.
     pub fn purge(&mut self) -> Vec<Publication> {
         let mut out: Vec<Publication> = self.topics.topics.iter().map(|t| self.clear(t)).collect();
         out.push(self.clear(&self.id.availability_topic));
-        self.topics.topics.clear();
-        self.topics_dirty = true;
+        self.unsettled = Some(BTreeSet::new());
         for t in self.tracks.values_mut() {
             t.announced = None;
             t.forget_state();
@@ -914,6 +952,7 @@ mod tests {
         let src = fixture("primary");
         let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
         engine.full_pass(&src, src.now(), 0.0);
+        engine.settle();
         let mut cfg = Config::default();
         cfg.identity.device_id = Some("gw1".into());
         engine.reconfigure(cfg, "router-primary");
@@ -924,6 +963,49 @@ mod tests {
             .count();
         assert_eq!(cleared, 22);
         assert!(topics_of(&out).contains("homeassistant/sensor/gw1_system_uptime/config"));
+    }
+
+    #[test]
+    fn clears_stay_in_the_ledger_until_they_are_settled() {
+        let src = fixture("primary");
+        let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
+        engine.full_pass(&src, src.now(), 0.0);
+        engine.settle();
+        let before = engine.topics().topics.clone();
+        let mut cfg = Config::default();
+        cfg.identity.device_id = Some("gw1".into());
+        engine.reconfigure(cfg, "router-primary");
+        let cleared = |out: &[Publication]| -> BTreeSet<String> {
+            out.iter()
+                .filter(|p| p.payload.is_empty())
+                .map(|p| p.topic.clone())
+                .collect()
+        };
+
+        // The connection drops before the clears are acknowledged: nothing
+        // calls `settle`, and the ledger (which is saved to flash) still
+        // knows the old topics.
+        let first = cleared(&engine.full_pass(&src, src.now(), 10.0));
+        assert!(!first.is_empty());
+        assert!(before.is_subset(&engine.topics().topics));
+        assert!(engine.take_dirty_topics().is_some());
+
+        // After reconnecting, the next pass issues them again.
+        let second = cleared(&engine.full_pass(&src, src.now(), 20.0));
+        assert_eq!(first, second);
+
+        // Delivered this time.
+        engine.settle();
+        assert!(before.is_disjoint(
+            &engine
+                .topics()
+                .topics
+                .iter()
+                .filter(|t| t.contains("openwrt_router-primary_"))
+                .cloned()
+                .collect()
+        ));
+        assert!(cleared(&engine.full_pass(&src, src.now(), 30.0)).is_empty());
     }
 
     #[test]
@@ -957,6 +1039,9 @@ mod tests {
         let out = engine.purge();
         assert_eq!(out.len(), owned + 1);
         assert!(out.iter().all(|p| p.payload.is_empty() && p.retain));
+        // The topics are forgotten once the clears are delivered.
+        assert_eq!(engine.topics().topics.len(), owned);
+        engine.settle();
         assert!(engine.topics().topics.is_empty());
     }
 
@@ -1267,6 +1352,84 @@ mod tests {
         fn now(&self) -> u64 {
             self.inner.now()
         }
+    }
+
+    /// Records the `ubus` objects and commands a pass uses.
+    struct Recorder<'a> {
+        inner: &'a dyn Source,
+        calls: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl<'a> Recorder<'a> {
+        fn new(inner: &'a dyn Source) -> Recorder<'a> {
+            Recorder {
+                inner,
+                calls: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().map(|c| c.clone()).unwrap_or_default()
+        }
+
+        fn record(&self, call: String) {
+            if let Ok(mut calls) = self.calls.lock() {
+                calls.push(call);
+            }
+        }
+    }
+
+    impl Source for Recorder<'_> {
+        fn ubus(&self, o: &str, m: &str, a: Option<&str>) -> SourceResult<Value> {
+            self.record(format!("ubus {o} {m}"));
+            self.inner.ubus(o, m, a)
+        }
+        fn read(&self, path: &str) -> SourceResult<String> {
+            self.inner.read(path)
+        }
+        fn list_dir(&self, path: &str) -> SourceResult<Vec<String>> {
+            self.inner.list_dir(path)
+        }
+        fn command(&self, program: &str, args: &[&str]) -> SourceResult<String> {
+            self.record(format!("{program} {}", args.join(" ")));
+            self.inner.command(program, args)
+        }
+        fn now(&self) -> u64 {
+            self.inner.now()
+        }
+    }
+
+    #[test]
+    fn groups_with_nothing_switched_on_are_not_collected() {
+        let src = fixture("primary");
+        let rec = Recorder::new(&src);
+        let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
+        engine.full_pass(&rec, src.now(), 0.0);
+        let calls = rec.calls();
+        for helper in [
+            "keepalived",
+            "ha-cluster",
+            "mwan3",
+            "luci-rpc",
+            "iwinfo",
+            "apk",
+        ] {
+            assert!(
+                !calls.iter().any(|c| c.contains(helper)),
+                "{helper} was read: {calls:?}"
+            );
+        }
+        assert!(calls.iter().any(|c| c.contains("network.interface")));
+
+        // Switching a metric of the group on makes the group read.
+        let rec = Recorder::new(&src);
+        let mut engine = Engine::new(
+            publishing(&["ha_role"]),
+            "router-primary",
+            TopicState::default(),
+        );
+        engine.full_pass(&rec, src.now(), 0.0);
+        assert!(rec.calls().iter().any(|c| c.contains("ha-cluster")));
     }
 
     #[test]

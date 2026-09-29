@@ -28,6 +28,8 @@ use crate::status::{self, Connection};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const LOOP_STEP: Duration = Duration::from_secs(1);
 const STATUS_EVERY: f64 = 15.0;
+/// How long a pass may wait for the broker to acknowledge its messages.
+const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const BACKOFF_MIN_S: f64 = 5.0;
 const BACKOFF_MAX_S: f64 = 120.0;
 /// A connection that lasted this long counts as healthy: the next failure
@@ -521,8 +523,10 @@ impl Daemon {
                         let pubs = self.engine.as_mut().map(Engine::purge).unwrap_or_default();
                         let count = pubs.len();
                         self.send(pubs);
-                        if let Some(s) = self.session.as_mut() {
-                            let _ = s.client.drain(Duration::from_secs(5));
+                        if self.confirm_delivery(Duration::from_secs(5)) {
+                            if let Some(engine) = self.engine.as_mut() {
+                                engine.settle();
+                            }
                         }
                         self.persist_topics();
                         self.need_full = true;
@@ -546,8 +550,9 @@ impl Daemon {
         }
         let now = self.now();
         let mono = self.mono();
+        let full = self.need_full;
         let pubs = match self.engine.as_mut() {
-            Some(engine) if self.need_full => {
+            Some(engine) if full => {
                 self.need_full = false;
                 // Availability is restated so it survives a purge.
                 let mut pubs = vec![Publication {
@@ -564,9 +569,33 @@ impl Daemon {
         };
         let changed = !pubs.is_empty();
         self.send(pubs);
+        if full && self.confirm_delivery(DELIVERY_TIMEOUT) {
+            if let Some(engine) = self.engine.as_mut() {
+                engine.settle();
+            }
+        }
         self.persist_topics();
         if changed {
             self.write_status();
+        }
+    }
+
+    /// Wait until the broker has acknowledged everything sent. A broker that
+    /// does not is treated like a lost connection.
+    fn confirm_delivery(&mut self, timeout: Duration) -> bool {
+        let Some(session) = self.session.as_mut() else {
+            return false;
+        };
+        match session.client.drain(timeout) {
+            Ok(messages) => {
+                self.handle_incoming(messages);
+                true
+            }
+            Err(e) => {
+                self.lost(&e);
+                self.need_full = true;
+                false
+            }
         }
     }
 
@@ -698,6 +727,10 @@ pub fn run(level: Option<Level>) -> i32 {
                 d.connect(&cfg);
                 d.write_status();
             } else {
+                // The wait can last two minutes; the status stays current.
+                if d.mono() - d.last_status >= STATUS_EVERY {
+                    d.write_status();
+                }
                 std::thread::sleep(LOOP_STEP.min(Duration::from_secs_f64(
                     (d.next_attempt - d.mono()).max(0.05),
                 )));
@@ -803,6 +836,7 @@ pub fn purge_once() -> i32 {
         return 1;
     }
     client.disconnect();
+    engine.settle();
     if let Some(state) = engine.take_dirty_topics() {
         let _ = state.save(Path::new(STATE_PATH));
     }
