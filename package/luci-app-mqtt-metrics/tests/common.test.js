@@ -50,6 +50,16 @@ for (const bad of [ '', '/a', 'a/', 'a//b', 'a/+/b', 'a/#' ])
 	assert.equal(mm.validTopic(bad), false, bad);
 assert.equal(mm.validObjectId('openwrt_r-1'), true);
 assert.equal(mm.validObjectId('bad id'), false);
+assert.equal(mm.utf8Length('abc'), 3);
+assert.equal(mm.utf8Length('\u00e9'), 2);
+assert.equal(mm.utf8Length('\u0444'), 2);
+assert.equal(mm.utf8Length('\u20ac'), 3);
+assert.equal(mm.utf8Length('\ud83d\ude00'), 4);
+assert.equal(mm.validName('a'.repeat(128)), true);
+assert.equal(mm.validName('a'.repeat(129)), false);
+// 65 Cyrillic letters are 65 characters but 130 bytes.
+assert.equal(mm.validName('\u0444'.repeat(64)), true);
+assert.equal(mm.validName('\u0444'.repeat(65)), false);
 assert.equal(mm.validIcon(''), true);
 assert.equal(mm.validIcon('mdi:router'), true);
 assert.equal(mm.validIcon('router'), false);

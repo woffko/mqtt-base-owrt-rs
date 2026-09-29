@@ -95,6 +95,30 @@ function validTopic(value) {
 	return value.split('/').every(function(level) { return level !== ''; });
 }
 
+// The daemon limits a display name to 128 bytes of UTF-8 and refuses the whole
+// configuration otherwise, so the form has to count bytes, not characters.
+function utf8Length(value) {
+	var n = 0;
+	for (var i = 0; i < value.length; i++) {
+		var c = value.charCodeAt(i);
+		if (c < 0x80)
+			n += 1;
+		else if (c < 0x800)
+			n += 2;
+		else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < value.length) {
+			n += 4;
+			i++;
+		}
+		else
+			n += 3;
+	}
+	return n;
+}
+
+function validName(value) {
+	return typeof value === 'string' && utf8Length(value) <= 128;
+}
+
 function validObjectId(value) {
 	return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
@@ -207,6 +231,8 @@ return baseclass.extend({
 	currentOf: currentOf,
 	overrideOptions: overrideOptions,
 	validTopic: validTopic,
+	utf8Length: utf8Length,
+	validName: validName,
 	validObjectId: validObjectId,
 	validIcon: validIcon,
 	validInterval: validInterval,

@@ -98,14 +98,13 @@ pub fn main(args: &[String]) -> i32 {
     }
 }
 
-/// Load the configuration; on errors fall back to defaults and report them.
+/// Load the configuration and report its errors. With errors the settings
+/// that could be read are returned, so that LuCI shows what is stored. A caller
+/// that runs the configuration must refuse it when there are errors.
 pub fn load_config(source: &dyn Source) -> (Config, Vec<String>) {
     let path = format!("/etc/config/{}", config::CONFIG_NAME);
     match source.command("uci", &["-q", "show", config::CONFIG_NAME]) {
-        Ok(text) => match config::from_uci_text(&text) {
-            Ok(cfg) => (cfg, Vec::new()),
-            Err(errors) => (Config::default(), errors),
-        },
+        Ok(text) => config::from_uci_text_lenient(&text),
         // No `uci` binary (tests, fixtures) or no configuration file (package
         // files not installed): run with the defaults.
         Err(crate::source::SourceError::Missing(_)) => (Config::default(), Vec::new()),
@@ -498,7 +497,14 @@ fn reload_daemon() -> Option<String> {
 }
 
 fn set_password(args: &Value) -> Value {
-    let password = args.get("password").and_then(Value::as_str).unwrap_or("");
+    // A missing or non-string password (or input that did not parse) must not
+    // be read as "remove the stored password".
+    let Some(password) = args.get("password").and_then(Value::as_str) else {
+        return json!({
+            "ok": false,
+            "error": "password must be a string; an empty string removes the stored one",
+        });
+    };
     if password.len() > 1024 || password.contains(['\n', '\r', '\0']) {
         return json!({ "ok": false, "error": "invalid password" });
     }
@@ -545,6 +551,74 @@ fn control_command(command: Command) -> Value {
 mod tests {
     use super::*;
     use crate::collect::tests::fixture;
+    use crate::source::SourceResult;
+
+    /// A source whose `uci show mqtt-metrics` returns the given text.
+    struct WithUci<'a> {
+        inner: &'a dyn Source,
+        text: &'a str,
+    }
+
+    impl Source for WithUci<'_> {
+        fn ubus(&self, o: &str, m: &str, a: Option<&str>) -> SourceResult<Value> {
+            self.inner.ubus(o, m, a)
+        }
+        fn read(&self, path: &str) -> SourceResult<String> {
+            self.inner.read(path)
+        }
+        fn list_dir(&self, path: &str) -> SourceResult<Vec<String>> {
+            self.inner.list_dir(path)
+        }
+        fn command(&self, program: &str, args: &[&str]) -> SourceResult<String> {
+            if program == "uci" && args == ["-q", "show", config::CONFIG_NAME] {
+                Ok(self.text.to_string())
+            } else {
+                self.inner.command(program, args)
+            }
+        }
+        fn now(&self) -> u64 {
+            self.inner.now()
+        }
+    }
+
+    #[test]
+    fn a_missing_or_wrong_password_argument_is_an_error() {
+        for args in [
+            json!({}),
+            json!({ "password": 12345 }),
+            json!({ "password": null }),
+        ] {
+            let reply = set_password(&args);
+            assert_eq!(reply["ok"], false, "{args}: {reply}");
+        }
+    }
+
+    #[test]
+    fn one_invalid_option_does_not_hide_the_other_settings() {
+        // LuCI saves whatever the Metrics page shows. If the page showed
+        // defaults while the configuration has an error, the next save would
+        // delete every override.
+        let src = fixture("primary");
+        let uci = WithUci {
+            inner: &src,
+            text: "mqtt-metrics.broker=broker\n\
+                   mqtt-metrics.broker.qos='2'\n\
+                   mqtt-metrics.system_load_1=metric\n\
+                   mqtt-metrics.system_load_1.publish='1'\n\
+                   mqtt-metrics.system_load_1.name='My Load'\n",
+        };
+        let doc = catalog(&uci);
+        assert!(!doc["config_errors"].as_array().unwrap().is_empty());
+        let load = doc["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["key"] == "system_load_1")
+            .unwrap();
+        assert_eq!(load["publish"], true);
+        assert_eq!(load["name"], "My Load");
+        assert_eq!(load["overridden"], true);
+    }
 
     #[test]
     fn catalog_from_fixture_lists_everything() {

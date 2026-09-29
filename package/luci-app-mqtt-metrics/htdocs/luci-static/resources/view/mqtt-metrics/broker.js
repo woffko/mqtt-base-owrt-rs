@@ -44,7 +44,7 @@ return view.extend({
 		o = s.option(form.Value, 'host', _('Host'), _('Name or address of the broker. The service stays idle while this is empty.'));
 		o.datatype = 'host';
 		o = s.option(form.Value, 'port', _('Port'));
-		o.datatype = 'port';
+		o.datatype = 'and(uinteger,range(1,65535))';
 		o.placeholder = '1883';
 		o = s.option(form.Value, 'username', _('User name'));
 		o = s.option(form.Value, '_password', _('Password'),
@@ -69,7 +69,7 @@ return view.extend({
 			return value === '' || mm.validObjectId(value) ? true : _('Only letters, digits, "_" and "-" are allowed');
 		};
 		o = s.option(form.Value, 'keepalive', _('Keepalive (s)'));
-		o.datatype = 'range(5,3600)';
+		o.datatype = 'and(uinteger,range(5,3600))';
 		o.placeholder = '60';
 		o = s.option(form.ListValue, 'qos', _('QoS for states'), _('Discovery messages always use QoS 1.'));
 		o.value('0', '0');

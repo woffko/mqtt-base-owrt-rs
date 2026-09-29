@@ -279,6 +279,19 @@ fn reader<'a>(pkg: &'a Package, name: &'a str, errors: Vec<String>) -> Reader<'a
 /// Build a configuration from parsed UCI data. All problems are collected and
 /// returned together so LuCI and the log can show them at once.
 pub fn from_uci(pkg: &Package) -> Result<Config, Vec<String>> {
+    let (cfg, errors) = from_uci_lenient(pkg);
+    if errors.is_empty() {
+        Ok(cfg)
+    } else {
+        Err(errors)
+    }
+}
+
+/// The same parse, returning what could be read together with the problems.
+/// An invalid value keeps its default. The daemon refuses a configuration with
+/// problems; this is for describing the stored settings (LuCI) without
+/// presenting defaults in their place.
+pub fn from_uci_lenient(pkg: &Package) -> (Config, Vec<String>) {
     let mut cfg = Config::default();
     let mut errors = Vec::new();
 
@@ -461,16 +474,18 @@ pub fn from_uci(pkg: &Package) -> Result<Config, Vec<String>> {
         cfg.metrics.insert(section.name.clone(), over);
     }
 
-    if errors.is_empty() {
-        Ok(cfg)
-    } else {
-        Err(errors)
-    }
+    (cfg, errors)
 }
 
 /// Parse `uci show mqtt-metrics` output.
 pub fn from_uci_text(text: &str) -> Result<Config, Vec<String>> {
     from_uci(&uci::parse(CONFIG_NAME, text))
+}
+
+/// Parse `uci show mqtt-metrics` output, keeping the valid settings when some
+/// are not.
+pub fn from_uci_text_lenient(text: &str) -> (Config, Vec<String>) {
+    from_uci_lenient(&uci::parse(CONFIG_NAME, text))
 }
 
 /// Read the password file. A missing file means "no password".

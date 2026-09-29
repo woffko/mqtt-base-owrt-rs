@@ -371,6 +371,8 @@ return view.extend({
 			var x = self.desired[key];
 			if (!mm.validInterval(x.interval, min, max))
 				errors.push(_('%s: interval is out of range').format(key));
+			if (x.name && !mm.validName(x.name))
+				errors.push(_('%s: the name must be at most 128 bytes long').format(key));
 			if (x.object_id && !mm.validObjectId(x.object_id))
 				errors.push(_('%s: object ID may contain only letters, digits, "_" and "-"').format(key));
 			if (x.topic && !mm.validTopic(x.topic))

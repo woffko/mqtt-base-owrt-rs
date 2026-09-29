@@ -132,12 +132,24 @@ fn parse_value(rest: &str) -> Assignment {
 }
 
 fn assignment(text: &str, name: &str) -> Assignment {
-    text.lines()
-        .find_map(|line| {
-            let rest = line.trim().strip_prefix(name)?.strip_prefix('=')?;
-            Some(parse_value(rest))
-        })
-        .unwrap_or(Assignment::Absent)
+    let found = text.lines().find_map(|line| {
+        let line = line.trim();
+        // `export NAME=value` and `readonly NAME=value` assign as well.
+        let line = ["export ", "readonly "]
+            .iter()
+            .find_map(|prefix| line.strip_prefix(prefix))
+            .map_or(line, str::trim_start);
+        let rest = line.strip_prefix(name)?.strip_prefix('=')?;
+        Some(parse_value(rest))
+    });
+    match found {
+        Some(assignment) => assignment,
+        // Assigned somewhere the parser does not read (inside a function or
+        // a condition): not a script without that setting, and importing "no
+        // password" would delete the stored one.
+        None if text.contains(&format!("{name}=")) => Assignment::Computed,
+        None => Assignment::Absent,
+    }
 }
 
 /// Read the broker settings from the script without running it. A setting
@@ -228,6 +240,25 @@ mod tests {
         assert_eq!(b.username.as_deref(), Some("openwrt"));
         assert_eq!(b.password.as_deref(), Some("s3cr'et"));
         assert!(!format!("{b:?}").contains("s3cr"));
+    }
+
+    #[test]
+    fn export_and_readonly_assignments_are_read() {
+        let script = "export MQTT_BROKER=\"192.0.2.10\"\nreadonly MQTT_USER='u'\nexport   MQTT_PASSWORD=\"pw\" # c\n";
+        let b = parse_script(script).unwrap();
+        assert_eq!(b.host, "192.0.2.10");
+        assert_eq!(b.username.as_deref(), Some("u"));
+        assert_eq!(b.password.as_deref(), Some("pw"));
+    }
+
+    #[test]
+    fn an_assignment_the_parser_does_not_read_is_not_an_absent_password() {
+        // Importing "no password" would delete the stored secret.
+        let script = "MQTT_BROKER=\"192.0.2.10\"\n[ -f /etc/x ] && MQTT_PASSWORD=\"pw\"\n";
+        assert!(parse_script(script).is_err());
+        // A script that never assigns one connects without a password.
+        let anonymous = parse_script("MQTT_BROKER=\"192.0.2.10\"\n").unwrap();
+        assert_eq!(anonymous.password, None);
     }
 
     #[test]
