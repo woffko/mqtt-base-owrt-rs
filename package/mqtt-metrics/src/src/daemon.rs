@@ -30,6 +30,10 @@ const LOOP_STEP: Duration = Duration::from_secs(1);
 const STATUS_EVERY: f64 = 15.0;
 /// How long a pass may wait for the broker to acknowledge its messages.
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Least time between two passes caused by Home Assistant announcements.
+const BIRTH_SPACING_S: f64 = 30.0;
+const CONFIG_RETRY_MIN_S: f64 = 10.0;
+const CONFIG_RETRY_MAX_S: f64 = 300.0;
 const BACKOFF_MIN_S: f64 = 5.0;
 const BACKOFF_MAX_S: f64 = 120.0;
 /// A connection that lasted this long counts as healthy: the next failure
@@ -79,6 +83,76 @@ impl Backoff {
     fn reset(&mut self) {
         self.delay = BACKOFF_MIN_S;
         self.connected_at = None;
+    }
+}
+
+/// A configuration that could not be read at all (`uci` failed or timed out)
+/// may be readable a moment later. One that is invalid stays invalid until
+/// someone edits it, and the reload that follows the edit reads it again, so
+/// only the first kind is retried.
+#[derive(Debug)]
+struct ConfigRetry {
+    delay: f64,
+    at: Option<f64>,
+}
+
+impl ConfigRetry {
+    fn new() -> ConfigRetry {
+        ConfigRetry {
+            delay: CONFIG_RETRY_MIN_S,
+            at: None,
+        }
+    }
+
+    /// The outcome of a load at `now`.
+    fn loaded(&mut self, now: f64, unreadable: bool) {
+        if unreadable {
+            self.at = Some(now + self.delay);
+            self.delay = (self.delay * 2.0).min(CONFIG_RETRY_MAX_S);
+        } else {
+            self.at = None;
+            self.delay = CONFIG_RETRY_MIN_S;
+        }
+    }
+
+    fn due(&self, now: f64) -> bool {
+        self.at.is_some_and(|at| now >= at)
+    }
+}
+
+/// Home Assistant announces itself once when it starts. Every announcement
+/// makes the daemon collect and republish everything, and anyone who can
+/// publish to the birth topic can send as many as they like, so passes caused
+/// by announcements are spaced out. An announcement that arrives too soon is
+/// answered as soon as the spacing allows.
+#[derive(Debug, Default)]
+struct BirthLimit {
+    last: Option<f64>,
+    deferred: bool,
+}
+
+impl BirthLimit {
+    /// An announcement arrived at `now`: `true` when it is answered now.
+    fn heard(&mut self, now: f64) -> bool {
+        if self.last.is_none_or(|last| now - last >= BIRTH_SPACING_S) {
+            self.last = Some(now);
+            self.deferred = false;
+            true
+        } else {
+            self.deferred = true;
+            false
+        }
+    }
+
+    /// `true` when a deferred announcement can be answered at `now`.
+    fn due(&mut self, now: f64) -> bool {
+        if self.deferred && self.last.is_some_and(|last| now - last >= BIRTH_SPACING_S) {
+            self.last = Some(now);
+            self.deferred = false;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -166,6 +240,8 @@ struct Daemon {
     need_full: bool,
     next_attempt: f64,
     backoff: Backoff,
+    config_retry: ConfigRetry,
+    birth_limit: BirthLimit,
     last_status: f64,
 }
 
@@ -187,6 +263,10 @@ impl Daemon {
 
     fn load(&mut self) {
         let (cfg, errors) = rpcd::load_config(&self.source);
+        let unreadable = errors
+            .iter()
+            .any(|e| e.starts_with(rpcd::CONFIG_UNREADABLE));
+        self.config_retry.loaded(self.mono(), unreadable);
         self.config = if errors.is_empty() {
             Ok(cfg)
         } else {
@@ -426,9 +506,14 @@ impl Daemon {
     fn handle_incoming(&mut self, messages: Vec<Incoming>) {
         for msg in messages {
             if self.is_birth(&msg) {
-                self.log
-                    .info("Home Assistant came online; resending discovery");
-                self.need_full = true;
+                if self.birth_limit.heard(self.mono()) {
+                    self.log
+                        .info("Home Assistant came online; resending discovery");
+                    self.need_full = true;
+                } else {
+                    self.log
+                        .debug("Home Assistant announced itself again; the resend is deferred");
+                }
             } else {
                 // Read-only design: no other incoming message is acted on.
                 self.log.debug(&format!("ignored message on {}", msg.topic));
@@ -550,6 +635,9 @@ impl Daemon {
         }
         let now = self.now();
         let mono = self.mono();
+        if self.birth_limit.due(mono) {
+            self.need_full = true;
+        }
         let full = self.need_full;
         let pubs = match self.engine.as_mut() {
             Some(engine) if full => {
@@ -666,6 +754,8 @@ pub fn run(level: Option<Level>) -> i32 {
         need_full: true,
         next_attempt: 0.0,
         backoff: Backoff::new(),
+        config_retry: ConfigRetry::new(),
+        birth_limit: BirthLimit::default(),
         last_status: 0.0,
     };
     d.conn.since = d.now();
@@ -701,7 +791,14 @@ pub fn run(level: Option<Level>) -> i32 {
             Ok(cfg) => cfg.clone(),
             Err(_) => {
                 d.set_state("config_error");
-                if d.mono() - d.last_status >= STATUS_EVERY {
+                if d.config_retry.due(d.mono()) {
+                    log.info("trying to read the configuration again");
+                    d.reload();
+                    if d.config.is_err() {
+                        d.set_state("config_error");
+                    }
+                    d.write_status();
+                } else if d.mono() - d.last_status >= STATUS_EVERY {
                     d.write_status();
                 }
                 std::thread::sleep(LOOP_STEP);
@@ -710,12 +807,14 @@ pub fn run(level: Option<Level>) -> i32 {
         };
         if !cfg.enabled || !cfg.configured() {
             d.disconnect(Farewell::Offline);
-            d.set_state(if cfg.enabled {
+            let state = if cfg.enabled {
                 "unconfigured"
             } else {
                 "disabled"
-            });
-            if d.mono() - d.last_status >= STATUS_EVERY {
+            };
+            let changed = d.conn.state != state;
+            d.set_state(state);
+            if changed || d.mono() - d.last_status >= STATUS_EVERY {
                 d.write_status();
             }
             std::thread::sleep(LOOP_STEP);
@@ -897,6 +996,46 @@ mod tests {
             &none,
             &msg("homeassistant/status", b"online", false)
         ));
+    }
+
+    #[test]
+    fn announcements_from_home_assistant_are_spaced_out() {
+        let mut limit = BirthLimit::default();
+        assert!(limit.heard(0.0), "the first one is answered at once");
+        assert!(!limit.heard(1.0));
+        assert!(!limit.heard(2.0));
+        assert!(!limit.due(29.0));
+        assert!(limit.due(30.0), "the deferred one is answered when allowed");
+        assert!(!limit.due(31.0), "and only once");
+        assert!(!limit.heard(40.0));
+        assert!(limit.due(60.0));
+        // Quiet for a while: the next one is answered at once again.
+        assert!(limit.heard(500.0));
+        assert!(!limit.due(1000.0));
+    }
+
+    #[test]
+    fn an_unreadable_configuration_is_retried_and_an_invalid_one_is_not() {
+        let mut retry = ConfigRetry::new();
+        assert!(!retry.due(1000.0), "nothing to retry after a good load");
+
+        // uci failed: try again after 10 s, then 20 s, and so on up to 5 min.
+        retry.loaded(100.0, true);
+        assert!(!retry.due(109.0));
+        assert!(retry.due(110.0));
+        retry.loaded(110.0, true);
+        assert!(!retry.due(129.0));
+        assert!(retry.due(130.0));
+        for _ in 0..10 {
+            retry.loaded(0.0, true);
+        }
+        assert_eq!(retry.at, Some(CONFIG_RETRY_MAX_S));
+
+        // An invalid configuration stays invalid until it is edited.
+        retry.loaded(500.0, false);
+        assert!(!retry.due(10_000.0));
+        retry.loaded(600.0, true);
+        assert_eq!(retry.at, Some(600.0 + CONFIG_RETRY_MIN_S));
     }
 
     #[test]

@@ -98,6 +98,10 @@ pub fn main(args: &[String]) -> i32 {
     }
 }
 
+/// Start of the error `load_config` returns when the configuration could not
+/// be read at all, as opposed to being invalid.
+pub const CONFIG_UNREADABLE: &str = "cannot read ";
+
 /// Load the configuration and report its errors. With errors the settings
 /// that could be read are returned, so that LuCI shows what is stored. A caller
 /// that runs the configuration must refuse it when there are errors.
@@ -116,7 +120,10 @@ pub fn load_config(source: &dyn Source) -> (Config, Vec<String>) {
         {
             (Config::default(), Vec::new())
         }
-        Err(e) => (Config::default(), vec![format!("cannot read {path}: {e}")]),
+        Err(e) => (
+            Config::default(),
+            vec![format!("{CONFIG_UNREADABLE}{path}: {e}")],
+        ),
     }
 }
 
