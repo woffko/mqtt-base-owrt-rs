@@ -294,6 +294,9 @@ struct Track {
     published_at: Option<u64>,
     announced: Option<String>,
     held: Held,
+    /// Monotonic time at which the metric is next due for a decision, by its
+    /// own interval. A group is read when the earliest of these arrives.
+    next_read: Option<f64>,
 }
 
 impl Track {
@@ -462,12 +465,23 @@ impl Engine {
         }
     }
 
-    fn group_interval(&self, group: Group) -> Option<u32> {
+    /// When the earliest metric of the group that is published is due again.
+    /// Each metric keeps its own interval: a group read every 60 s because of
+    /// one metric does not turn a 90 s metric into a 120 s one.
+    fn group_due(&self, group: Group, mono: f64) -> Option<f64> {
         self.entries
             .values()
             .filter(|e| e.def.group == group && e.publish)
-            .map(|e| e.interval)
-            .min()
+            .map(|e| {
+                self.tracks
+                    .get(&e.key)
+                    .and_then(|t| t.next_read)
+                    // Not decided at the last read (unavailable, or new):
+                    // look again after one interval.
+                    .filter(|due| *due > mono)
+                    .unwrap_or(mono + f64::from(e.interval))
+            })
+            .reduce(f64::min)
     }
 
     /// Interval for a group that publishes nothing right now. It is still
@@ -487,12 +501,12 @@ impl Engine {
     }
 
     fn reschedule(&mut self, group: Group, mono: f64) {
-        match self
-            .group_interval(group)
-            .or_else(|| self.idle_interval(group))
-        {
-            Some(i) => {
-                self.next_due.insert(group, mono + f64::from(i));
+        let due = self
+            .group_due(group, mono)
+            .or_else(|| self.idle_interval(group).map(|i| mono + f64::from(i)));
+        match due {
+            Some(due) => {
+                self.next_due.insert(group, due);
             }
             None => {
                 self.next_due.remove(&group);
@@ -628,11 +642,13 @@ impl Engine {
             self.tracks.entry(key).or_default().announced = payload;
         }
         for (key, publication, payload) in states {
+            let interval = self.entries.get(&key).map_or(0, |e| e.interval);
             let t = self.tracks.entry(key).or_default();
             t.last_payload = Some(payload);
             t.last_publish = Some(mono);
             t.published_at = Some(now);
             t.held = Held::On(publication.topic.clone());
+            t.next_read = Some(mono + f64::from(interval));
             out.push(publication);
         }
         for (key, topic) in clears {
@@ -735,7 +751,11 @@ impl Engine {
             if e.publish {
                 match &e.reading {
                     Reading::Value(_) => {
-                        if let Some(payload) = e.payload() {
+                        // The group is read at its earliest metric; the others
+                        // wait for their own interval.
+                        let read_due = track.next_read.is_none_or(|t| mono + DUE_SLACK >= t);
+                        if let (true, Some(payload)) = (read_due, e.payload()) {
+                            track.next_read = Some(mono + f64::from(e.interval));
                             let elapsed = track.last_publish.map(|t| mono - t + DUE_SLACK);
                             let due = if self.cfg.publish.change_only {
                                 track.last_payload.as_deref() != Some(payload.as_str())
@@ -1028,6 +1048,41 @@ mod tests {
         assert!(engine.tick(&src, src.now(), 700.0).is_empty());
         // After max_age everything is refreshed.
         assert!(!engine.tick(&src, src.now(), 400.0 + 3600.0).is_empty());
+    }
+
+    #[test]
+    fn a_metric_is_published_at_its_own_interval() {
+        // 60 s and 90 s in one group: the 90 s metric is not rounded up to 120 s.
+        let src = fixture("primary");
+        let mut cfg = Config::default();
+        for (key, interval) in [("system_load_1", 60), ("system_load_5", 90)] {
+            cfg.metrics.insert(
+                key.to_string(),
+                MetricOverride {
+                    publish: Some(true),
+                    interval: Some(interval),
+                    ..MetricOverride::default()
+                },
+            );
+        }
+        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
+        engine.full_pass(&src, src.now(), 0.0);
+        let (l1, l5) = (
+            "openwrt/router-primary/system/load_1",
+            "openwrt/router-primary/system/load_5",
+        );
+        let mut step = |t: f64| {
+            let out = engine.tick(&src, src.now(), t);
+            (
+                payload_of(&out, l1).is_some(),
+                payload_of(&out, l5).is_some(),
+                engine.next_due(),
+            )
+        };
+        assert_eq!(step(60.0), (true, false, Some(90.0)));
+        assert_eq!(step(90.0), (false, true, Some(120.0)));
+        assert_eq!(step(120.0), (true, false, Some(180.0)));
+        assert_eq!(step(180.0), (true, true, Some(240.0)));
     }
 
     #[test]
