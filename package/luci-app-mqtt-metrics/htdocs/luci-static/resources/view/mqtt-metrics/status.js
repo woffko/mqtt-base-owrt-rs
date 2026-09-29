@@ -60,6 +60,10 @@ return view.extend({
 		];
 		if (st.last_error)
 			rows.push(row(_('Last error'), E('span', { 'style': 'color:#c44' }, [ mm.text(st.last_error) ])));
+		if (st.birth_denied)
+			rows.push(row(_('Birth topic'), E('span', { 'style': 'color:#c44' }, [
+				mm.text(_('The broker denied the subscription. Discovery is not resent when Home Assistant restarts; allow the topic in the broker ACL or turn the subscription off on the Topics page.'))
+			])));
 		if (st.next_attempt && st.state !== 'connected')
 			rows.push(row(_('Next attempt'), mm.formatTime(st.next_attempt)));
 		if (dev.id) {

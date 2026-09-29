@@ -14,7 +14,7 @@ var callLog = rpc.declare({ object: 'mqtt-metrics', method: 'log' });
 var callTest = rpc.declare({
 	object: 'mqtt-metrics',
 	method: 'test_connection',
-	params: [ 'host', 'port', 'username', 'password', 'keep_password', 'client_id', 'tls' ]
+	params: [ 'host', 'port', 'username', 'password', 'keep_password', 'tls', 'tls_verify' ]
 });
 var callSetPassword = rpc.declare({ object: 'mqtt-metrics', method: 'set_password', params: [ 'password' ] });
 var callImportLegacy = rpc.declare({ object: 'mqtt-metrics', method: 'import_legacy' });

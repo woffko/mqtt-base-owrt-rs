@@ -103,7 +103,7 @@ return view.extend({
 		};
 
 		o = s.option(form.Button, '_test', _('Connection test'),
-			_('Connects with the values shown above, including unsaved changes, then disconnects. Nothing is published.'));
+			_('Connects with the address, user, password and TLS switches shown above, including unsaved changes, then disconnects. Nothing is published. The stored password is used only for the saved address; type it to test another one. Certificate files are taken from the saved configuration.'));
 		o.inputtitle = _('Test connection');
 		o.inputstyle = 'action';
 		o.onclick = function() {
@@ -114,8 +114,8 @@ return view.extend({
 				formValue(m, 'broker', 'username') || '',
 				typed,
 				typed === '',
-				formValue(m, 'broker', 'client_id') || '',
-				formValue(m, 'broker', 'tls') === '1'
+				formValue(m, 'broker', 'tls') === '1',
+				formValue(m, 'broker', 'tls_verify') !== '0'
 			];
 			return mm.callTest.apply(mm, args).then(function(res) {
 				ui.addNotification(null, E('p', {}, [ mm.text(res.ok ? res.message : (_('Connection failed') + ': ' + res.error)) ]),
@@ -141,6 +141,11 @@ return view.extend({
 					window.setTimeout(function() { window.location.reload(); }, 1500);
 				});
 			};
+		}
+
+		if (legacy.script && !legacy.importable && legacy.import_error) {
+			s = m.section(form.NamedSection, 'broker', 'broker', _('Legacy script'),
+				_('The legacy publish_metrics.sh script is installed, but its broker settings cannot be imported:') + ' ' + legacy.import_error);
 		}
 
 		this.map = m;

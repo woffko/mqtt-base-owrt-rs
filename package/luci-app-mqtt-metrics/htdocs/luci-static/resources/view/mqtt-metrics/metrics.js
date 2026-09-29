@@ -111,6 +111,10 @@ return view.extend({
 		]);
 	},
 
+	legacyInterfaces: function() {
+		return (this.catalog.interfaces || []).filter(function(i) { return i.legacy_wan; }).map(function(i) { return i.name; });
+	},
+
 	renderChoiceList: function(items, selected, disabled) {
 		return E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:.3em 1.2em' }, items.map(function(item) {
 			var cb = checkbox(selected.indexOf(item.name) >= 0, function(v) {
@@ -143,7 +147,7 @@ return view.extend({
 		mode.addEventListener('change', function() {
 			self.select.mode = mode.value;
 			if (mode.value === 'auto')
-				self.select.interfaces = (c.interfaces || []).filter(function(i) { return i.legacy_wan; }).map(function(i) { return i.name; });
+				self.select.interfaces = self.legacyInterfaces();
 			drawIfaces();
 		});
 
@@ -200,9 +204,17 @@ return view.extend({
 
 	renderRow: function(m) {
 		var self = this, d = this.desired[m.key], def = mm.defaultsOf(m);
-		var value = m.available
-			? mm.text(mm.formatValue(m.value != null ? m.value : m.last_published, m.unit))
-			: E('em', { 'style': 'opacity:.7' }, [ mm.text(m.reason || _('unavailable')) ]);
+		var value;
+		if (m.available)
+			value = mm.text(mm.formatValue(m.value, m.unit));
+		else if (m.last_published != null && m.last_published !== '')
+			// Rates and CPU need two samples; this page has only one.
+			value = E('span', { 'title': m.reason || '' }, [
+				mm.text(mm.formatValue(m.last_published, m.unit) + ' '),
+				E('em', { 'style': 'opacity:.7' }, [ mm.text('(' + _('last published') + ')') ])
+			]);
+		else
+			value = E('em', { 'style': 'opacity:.7' }, [ mm.text(m.reason || _('unavailable')) ]);
 		var details = E('tr', { 'class': 'tr', 'style': 'display:none' }, [ E('td', { 'class': 'td', 'colspan': 6 }) ]);
 		var detailsBuilt = false;
 		var row = E('tr', { 'class': 'tr', 'data-key': m.key }, [
@@ -283,6 +295,13 @@ return view.extend({
 			this.root.querySelectorAll('[data-group] > div').forEach(function(b) { b.style.display = ''; });
 	},
 
+	// The Publishing and Selection sections keep references into this.publish
+	// and this.select; draw them again whenever those objects are replaced.
+	drawSections: function() {
+		dom.content(this.publishBox, this.renderPublishing());
+		dom.content(this.selectBox, this.renderSelection());
+	},
+
 	redrawGroups: function() {
 		var self = this;
 		dom.content(this.groupBox, (this.catalog.groups || []).map(function(g) { return self.renderGroup(g); }));
@@ -294,6 +313,8 @@ return view.extend({
 		this.initState(data[0] || {});
 		this.grouped = mm.groupMetrics(this.metrics);
 		this.groupBox = E('div');
+		this.publishBox = E('div');
+		this.selectBox = E('div');
 
 		var search = input('', _('Filter by name, key or instance'), function(v) { self.filter = v; self.applyFilter(); }, '20em');
 		var tools = E('div', { 'class': 'cbi-section' }, [
@@ -311,9 +332,10 @@ return view.extend({
 					self.desired = mm.legacyDefaults(self.metrics);
 					Object.keys(self.groups).forEach(function(g) { self.groups[g] = { enabled: true, interval: '' }; });
 					self.publish = { interval: '300', change_only: false, max_age: '3600' };
-					self.select = { mode: 'auto', interfaces: [], devices: [], services: [] };
+					self.select = { mode: 'auto', interfaces: self.legacyInterfaces(), devices: [], services: [] };
 					self.resetRequested = true;
 					ui.addNotification(null, E('p', {}, [ mm.text(_('Legacy defaults restored in the form. Save & Apply to use them.')) ]), 'info');
+					self.drawSections();
 					self.redrawGroups();
 				})
 			])
@@ -324,11 +346,12 @@ return view.extend({
 			E('div', { 'class': 'cbi-map-descr' }, [ mm.text(_('Choose what is published and what Home Assistant shows. Hiding a metric removes its entity; values that a router cannot provide are listed with the reason.')) ]),
 			(this.catalog.config_errors || []).length ? E('div', { 'class': 'alert-message warning' },
 				this.catalog.config_errors.map(function(e) { return E('div', {}, [ mm.text(e) ]); })) : '',
-			this.renderPublishing(),
-			this.renderSelection(),
+			this.publishBox,
+			this.selectBox,
 			tools,
 			this.groupBox
 		]);
+		this.drawSections();
 		this.redrawGroups();
 		return this.root;
 	},

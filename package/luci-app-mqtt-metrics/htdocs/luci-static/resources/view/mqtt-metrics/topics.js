@@ -65,8 +65,13 @@ return view.extend({
 		o.placeholder = 'homeassistant';
 		o.validate = topicValidator(true);
 		o.onchange = updateWarning;
+		o = s.option(form.Flag, 'birth', _('Resend discovery when Home Assistant restarts'),
+			_('Subscribes to the birth topic below, the only subscription the service makes. A message there only makes the service resend its discovery messages; it never triggers anything else. Turn it off if the broker does not allow the subscription.'));
+		o.default = '1';
+		o.rmempty = false;
 		o = s.option(form.Value, 'birth_topic', _('Birth topic'),
-			_('Home Assistant announces "online" here after a restart; discovery is then resent. Empty disables the subscription. This is the only topic the service subscribes to.'));
+			_('Home Assistant announces "online" here after a restart.'));
+		o.depends('birth', '1');
 		o.placeholder = 'homeassistant/status';
 		o.validate = topicValidator(true);
 		o = s.option(form.Value, 'device_id', _('Device ID'), _('Prefix of every unique_id. Default: openwrt_&lt;hostname&gt;.'));

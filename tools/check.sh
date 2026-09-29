@@ -16,6 +16,13 @@ node tests/common.test.js
 node tests/package.test.js
 
 cd "$REPO"
+# The LuCI views run in headless Chromium against a stand-in for the LuCI
+# runtime; skipped where the local Playwright installation is not available.
+if [ -d /home/w0w/.local/share/playwright/node_modules/playwright ]; then
+	node tools/luci-view-tests.browser.js
+else
+	echo "skipping tools/luci-view-tests.browser.js (no Playwright)"
+fi
 sh -n package/mqtt-metrics/files/etc/init.d/mqtt-metrics
 python3 -m py_compile tools/sanitize-fixtures.py tools/parity-check.py tools/gen-topics.py
 echo "all checks passed"
