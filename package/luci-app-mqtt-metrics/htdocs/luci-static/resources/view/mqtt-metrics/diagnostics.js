@@ -18,7 +18,7 @@ function row(label, value) {
 return view.extend({
 	load: function() {
 		return Promise.all([
-			L.resolveDefault(mm.callLegacy(), {}),
+			L.resolveDefault(mm.callLegacy(), null),
 			L.resolveDefault(mm.callCatalog(), {}),
 			L.resolveDefault(mm.callLog(), {}),
 			L.resolveDefault(mm.callStatus(), {})
@@ -26,6 +26,12 @@ return view.extend({
 	},
 
 	renderLegacy: function(legacy) {
+		// A call that failed is not an installation that is absent.
+		if (!legacy || legacy.error)
+			return E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, [ mm.text(_('Legacy publish_metrics.sh')) ]),
+				E('p', {}, [ mm.text(_('The service did not answer, so nothing is known about the legacy installation.')) ])
+			]);
 		var steps = [
 			_('Check on the Status page that the service is connected and publishing with discovery on.'),
 			_('Back up /etc/rc.local, /etc/crontabs/root and /usr/bin/publish_metrics.sh.'),
@@ -131,7 +137,7 @@ return view.extend({
 	render: function(data) {
 		return E('div', { 'class': 'cbi-map' }, [
 			E('h2', {}, [ mm.text(_('MQTT Metrics: Diagnostics')) ]),
-			this.renderLegacy(data[0] || {}),
+			this.renderLegacy(data[0]),
 			this.renderActions(data[3] || {}),
 			this.renderPreview(data[1] || {}),
 			this.renderLog(data[2] || {})

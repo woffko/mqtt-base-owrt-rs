@@ -19,6 +19,10 @@ use super::transport::Transport;
 const MAX_INCOMING: usize = 64 * 1024;
 const MAX_INFLIGHT: usize = 32;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(15);
+/// The longest a publish waits for room in the window of unacknowledged
+/// messages. A broker that has not acknowledged any of 32 messages in this
+/// time is not answering, and the loop cannot handle a signal meanwhile.
+const WINDOW_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub enum MqttError {
@@ -322,7 +326,7 @@ impl Client {
         retain: bool,
     ) -> Result<Vec<Incoming>, MqttError> {
         let mut received = Vec::new();
-        let window_deadline = Instant::now() + self.ack_timeout();
+        let window_deadline = Instant::now() + self.ack_timeout().min(WINDOW_WAIT);
         while qos == 1 && self.inflight.len() >= MAX_INFLIGHT {
             if Instant::now() >= window_deadline {
                 return Err(MqttError::Timeout("PUBACK"));

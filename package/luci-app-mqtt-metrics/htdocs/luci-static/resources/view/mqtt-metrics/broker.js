@@ -79,10 +79,10 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 		o = s.option(form.Flag, 'tls', _('Use TLS'),
-			catalog.tls_supported ? null : _('This build has no TLS support; enabling it makes the configuration invalid.'));
+			catalog.tls_supported === false ? _('This build has no TLS support; enabling it makes the configuration invalid.') : null);
 		o.default = '0';
 		o.validate = function(section_id, value) {
-			return (value === '1' && !catalog.tls_supported) ? _('TLS is not supported by this build') : true;
+			return (value === '1' && catalog.tls_supported === false) ? _('TLS is not supported by this build') : true;
 		};
 		o = s.option(form.Value, 'tls_ca', _('CA certificate file'),
 			_('PEM file with the certificate authority of the broker. Empty: the system bundle /etc/ssl/certs/ca-certificates.crt.'));

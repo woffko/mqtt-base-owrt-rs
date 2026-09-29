@@ -113,3 +113,12 @@ Found by the independent review of the same commit:
   index and a stopped service are reported as what they are.
 - `status.json` stays current while the service waits to reconnect; a
   helper that leaves a process behind cannot hold the service up.
+- Every metric is published at its own interval (60 s and 90 s in one group
+  used to become 60 s and 120 s).
+- Disabling the service in LuCI and enabling it again works (the reload
+  trigger was lost); a configuration that could not be read is read again;
+  passes caused by Home Assistant announcements are at least 30 s apart; a
+  publish waits at most 10 s for the broker to acknowledge earlier messages.
+- Tools: the parity check needs the daemon's dry run to name the removals it
+  accepts; the browser scripts no longer print the router password in
+  errors.
