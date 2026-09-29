@@ -307,10 +307,10 @@ impl Daemon {
     }
 
     fn is_birth(&self, msg: &Incoming) -> bool {
-        let Ok(cfg) = &self.config else { return false };
-        cfg.identity.birth_topic.as_deref() == Some(msg.topic.as_str())
-            && msg.payload == b"online"
-            && !msg.retain
+        match &self.config {
+            Ok(cfg) => is_birth_message(cfg, msg),
+            Err(_) => false,
+        }
     }
 
     fn handle_incoming(&mut self, messages: Vec<Incoming>) {
@@ -471,6 +471,16 @@ impl Daemon {
             .map_or(LOOP_STEP.as_secs_f64(), |t| (t - mono).max(0.05));
         Duration::from_secs_f64(until_due.min(LOOP_STEP.as_secs_f64()))
     }
+}
+
+/// The only incoming message the daemon reacts to: a live (non-retained)
+/// `online` on the configured birth topic with discovery on. Everything else
+/// is dropped, which keeps the integration read-only.
+pub fn is_birth_message(cfg: &Config, msg: &Incoming) -> bool {
+    cfg.identity.discovery
+        && cfg.identity.birth_topic.as_deref() == Some(msg.topic.as_str())
+        && msg.payload == b"online"
+        && !msg.retain
 }
 
 /// Birth topic to subscribe to: only with discovery on.
@@ -655,4 +665,60 @@ pub fn purge_once() -> i32 {
     log.info(&format!("cleared {} retained topics", pubs.len()));
     let _ = std::fs::create_dir_all(RUN_DIR);
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(topic: &str, payload: &[u8], retain: bool) -> Incoming {
+        Incoming {
+            topic: topic.to_string(),
+            payload: payload.to_vec(),
+            retain,
+        }
+    }
+
+    #[test]
+    fn only_a_live_birth_message_is_accepted() {
+        let cfg = Config::default();
+        assert!(is_birth_message(
+            &cfg,
+            &msg("homeassistant/status", b"online", false)
+        ));
+        // Retained birth, other payloads, other topics and command-like
+        // topics are all dropped.
+        assert!(!is_birth_message(
+            &cfg,
+            &msg("homeassistant/status", b"online", true)
+        ));
+        assert!(!is_birth_message(
+            &cfg,
+            &msg("homeassistant/status", b"offline", false)
+        ));
+        for topic in [
+            "openwrt/r1/set",
+            "openwrt/r1/command",
+            "homeassistant/button/openwrt_r1_reboot/set",
+            "homeassistant/status/extra",
+            "#",
+        ] {
+            assert!(
+                !is_birth_message(&cfg, &msg(topic, b"online", false)),
+                "{topic}"
+            );
+        }
+        let mut off = Config::default();
+        off.identity.discovery = false;
+        assert!(!is_birth_message(
+            &off,
+            &msg("homeassistant/status", b"online", false)
+        ));
+        let mut none = Config::default();
+        none.identity.birth_topic = None;
+        assert!(!is_birth_message(
+            &none,
+            &msg("homeassistant/status", b"online", false)
+        ));
+    }
 }
