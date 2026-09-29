@@ -23,14 +23,30 @@ topics only `+`, `#` and `/` are replaced.
 States and discovery configs are retained. States use the configured QoS
 (default 1); discovery and removals always use QoS 1.
 
+Instance names come from the system (interfaces, devices, services, WireGuard
+peer descriptions). In ids they are sanitized to letters, digits, `_` and
+`-`; in topics `+`, `#` and `/` are replaced by `_`. When two instances would
+end up with the same id (two peers with the same description, `eth0.1` and
+`eth0_1`), the later ones get a numeric suffix (`_2`, `_3`) so that each keeps
+its own entity.
+
 ## Payloads
 
 - Text and numbers are published as plain strings (`123`, `0.42`, `online`).
 - Legacy interface status uses `up`/`down`; every other binary sensor uses
   `ON`/`OFF`.
-- A value that is not available is not published. The legacy script
-  published an empty retained payload instead, which deleted the retained
-  state.
+- A value that is not available is never published as a placeholder. What
+  happens to the retained state depends on why there is no value:
+  - the value is **absent** (an interface is down and has no address, a
+    tracking target does not answer, an instance disappeared): a retained
+    value published earlier is cleared once with an empty retained message,
+    like the legacy script did, so Home Assistant shows it as unknown instead
+    of a stale value that looks current;
+  - the value **could not be read** (a `ubus` call timed out, an answer was
+    garbled): the last published value is kept, because the value did not go
+    away. The next successful read replaces it;
+  - the value **cannot exist** on this router (see below): it is not
+    announced at all.
 - Timestamps (`system.boot_time`) are RFC 3339 in UTC.
 
 Discovery configs contain every field the legacy script sent, with the same
@@ -71,18 +87,28 @@ on each full pass. The file changes only when that set changes.
 | --- | --- |
 | Six discovery configs per WAN interface, even for values the interface can never have | Only values the interface protocol can provide are announced; the rest are removed once (see below) |
 | Link-local `fe80::` address published as the IPv6 of a PPPoE interface | Only global and ULA addresses are published |
-| Empty retained payloads for missing values | Missing values are not published |
+| Empty retained payloads for every missing value, including failed reads | A value that goes away is cleared once; a failed read keeps the last value |
 | No availability | Last Will and `availability_topic` |
 | Discovery every 5 minutes | Discovery on connect, on changes and on HA birth |
 | About 60 `mosquitto_pub` processes per run, password on the command line | One persistent connection; the password is read from a root-only file |
 
-Values treated as impossible (never announced, legacy leftovers removed):
+Values treated as impossible (never announced, legacy leftovers removed)
+when the interface has no such address:
 
-- IPv4 address and gateway on `dhcpv6`, `6in4`, `6to4`, `6rd`, `dslite`,
-  `map` and `464xlat` interfaces;
+- IPv4 address and gateway on `dhcpv6`, `6in4`, `6to4` and `6rd`
+  interfaces. DS-Lite, MAP and 464XLAT are not in this list: they carry IPv4
+  over IPv6 and their interface has an IPv4 address;
 - IPv6 address and gateway on `dhcp`, `pppoe`, `pppoa`, `pptp` and `l2tp`
-  interfaces, and on `static` interfaces without `ip6addr`, `ip6gw` or
-  `ip6prefix` (their IPv6 is carried by a separate DHCPv6 interface).
+  interfaces, and on `static` interfaces without `ip6addr`, `ip6gw`,
+  `ip6prefix` or `ip6assign` (their IPv6 is carried by a separate DHCPv6
+  interface).
+
+The rule only decides whether a *missing* address is permanent. An address
+that exists is always published, whatever the protocol.
+
+A link speed is impossible only for devices that never have one (PPP,
+tunnels). Ethernet, bridge, VLAN and bond devices report a speed again when
+the link comes up, so a missing speed there is an ordinary absent value.
 
 ## Metric templates
 

@@ -100,7 +100,9 @@ Assistant.
 On its first pass with discovery on, the daemon adopts the legacy topics of
 this router: entities that can never have a value are removed, all others
 keep their `unique_id` and history. The retained `openwrt-shadow/...` states
-are cleared at the same time.
+are cleared at the same time. The daemon does this only when the crontab no
+longer schedules `publish_metrics.sh`; while the cron line exists it leaves
+the legacy topics alone, because the script would publish them again.
 
 ## 4. Remove the installer block from rc.local
 

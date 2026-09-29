@@ -50,7 +50,9 @@ it):
   configuration. Migration from the legacy script is a documented, reversible
   manual step.
 - A missing data source (no `mwan3`, no `keepalived`, no thermal sensor, no
-  Wi-Fi) must make the metric unavailable, never publish a fake value.
+  Wi-Fi) must make the metric unavailable, never publish a fake value. A value
+  that goes away is cleared once (empty retained message); a failed read keeps
+  the last value (ADR-0006).
 - The integration is read-only: no command entities, no command topics, and
   no code path from an incoming MQTT message to an action on the router. The
   only subscription is the HA birth topic, which only triggers a discovery

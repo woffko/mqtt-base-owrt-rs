@@ -49,7 +49,8 @@ The password is copied on the router and not shown.
 | Node | hostname | One topic level. |
 | MQTT discovery | on | Off is shadow mode: states are published, nothing is announced, and entities announced earlier are removed. |
 | Discovery prefix | `homeassistant` | |
-| Birth topic | `homeassistant/status` | The only topic the service subscribes to. An `online` message makes it resend discovery. Empty disables the subscription. |
+| Resend discovery when Home Assistant restarts | on | Subscribes to the birth topic. Turn it off if the broker does not allow the subscription; the Status page shows a warning when the broker refuses it. |
+| Birth topic | `homeassistant/status` | The only topic the service subscribes to. An `online` message makes it resend discovery. |
 | Device ID | `openwrt_<hostname>` | Prefix of every `unique_id`. |
 | Device name, Manufacturer, Model | `OpenWrt <hostname>`, `OpenWrt`, `Router` | Shown on the Home Assistant device page. |
 | Configuration URL | empty | Link on the Home Assistant device page. |
@@ -60,10 +61,15 @@ entities in Home Assistant; their history does not carry over. The page
 shows a warning as soon as one of these fields changes. The old entities and
 retained topics are removed automatically.
 
-**Remove legacy leftovers**: on the first start with discovery on, the
-service adopts the legacy script's topics for this router and removes the
-entities that can never have a value, for example the IPv4 address of a
-DHCPv6 interface or the IPv6 address of a PPPoE interface.
+**Remove legacy leftovers**: on the first pass with discovery on, the
+service adopts the legacy script's topics for this router and clears every
+one of them that this configuration no longer publishes: the entities that
+can never have a value (the IPv4 address of a DHCPv6 interface, the IPv6
+address of a PPPoE interface) and, when the device ID, base topic or
+discovery prefix differs from the legacy layout, all the old entities. While
+the legacy script is still scheduled in `/etc/crontabs/root` the service
+leaves its topics alone, because the script would publish them again; the
+adoption happens on the first pass after the cron line is removed.
 
 ## Metrics
 
@@ -72,6 +78,11 @@ DHCPv6 interface or the IPv6 address of a PPPoE interface.
 - **Global interval**: seconds between publications (5-86400, default 300).
 - **Publish only changes**: values are still read at their interval but
   sent only when they change, and at least once per **Maximum age**.
+
+A group is read as often as its shortest interval. A metric with a longer
+interval is published at the first read after that interval has passed, so it
+is effectively rounded up to a multiple of the group's shortest interval (with
+60 s and 90 s in one group, the 90 s metric is published every 120 s).
 
 ### Selection
 
@@ -134,6 +145,15 @@ mqtt-metricsd --import-legacy          # copy broker settings from publish_metri
 mqtt-metricsd --purge                  # clear every retained topic this router owns
 /etc/init.d/mqtt-metrics reload        # apply a configuration committed with uci
 ```
+
+`--purge` asks a running service to clear its topics and publish everything
+again; without a running service it connects once and only clears.
+
+Only one `mqtt-metricsd` can run at a time (a lock in
+`/var/run/mqtt-metrics/daemon.lock`). After a lost connection the service
+waits 5 s, 10 s, ... up to 120 s before reconnecting; a connection that held
+for a minute starts over from 5 s, and a configuration change reconnects at
+once.
 
 `uci commit` from the command line does not notify procd; run
 `/etc/init.d/mqtt-metrics reload` afterwards. LuCI does this automatically.

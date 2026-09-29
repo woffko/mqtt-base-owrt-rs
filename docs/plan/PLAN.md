@@ -229,7 +229,9 @@ Everything below is configurable in LuCI; the defaults are the legacy values.
     entity.
   - "Show in Home Assistant" off: state is still published (for Node-RED or
     other consumers), discovery is cleared.
-- Empty or unavailable values are never sent as empty retained payloads.
+- Placeholder values are never published. (Superseded in part by ADR-0006:
+  a value that goes away is cleared once with an empty retained message; a
+  failed read keeps the last value.)
 - Migration cleanup: on first start the daemon clears discovery configs for
   legacy entities that can never have a value (section 2.3, item 4). It is
   shown on the Diagnostics page and can be disabled.
