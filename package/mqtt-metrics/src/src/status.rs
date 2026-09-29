@@ -20,6 +20,8 @@ pub struct Connection {
     pub publish_errors: u64,
     pub last_publish: Option<u64>,
     pub next_attempt: Option<u64>,
+    /// The broker refused the subscription to the Home Assistant birth topic.
+    pub birth_denied: bool,
 }
 
 pub fn render(
@@ -42,6 +44,7 @@ pub fn render(
         "publish_errors": conn.publish_errors,
         "last_publish": conn.last_publish,
         "next_attempt": conn.next_attempt,
+        "birth_denied": conn.birth_denied,
         "config_errors": config_errors,
     });
     if let Some(engine) = engine {

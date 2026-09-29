@@ -15,7 +15,7 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
             return;
         }
         Err(e) => {
-            out.miss_group(Group::Dhcp, &e.to_string());
+            out.miss_group_err(Group::Dhcp, &e);
             return;
         }
     };

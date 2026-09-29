@@ -49,7 +49,8 @@ pub struct Identity {
     pub node: Option<String>,
     pub discovery: bool,
     pub discovery_prefix: String,
-    /// `None` disables the Home Assistant birth subscription.
+    /// `None` disables the Home Assistant birth subscription (`birth = 0` or
+    /// an empty `birth_topic`).
     pub birth_topic: Option<String>,
     pub device_id: Option<String>,
     pub device_name: Option<String>,
@@ -356,6 +357,11 @@ pub fn from_uci(pkg: &Package) -> Result<Config, Vec<String>> {
         Some("") => cfg.identity.birth_topic = None,
         Some(_) => cfg.identity.birth_topic = r.topic("birth_topic"),
     }
+    // LuCI cannot store an empty option, so the subscription has its own
+    // switch; an empty `birth_topic` set with `uci` still turns it off.
+    if !r.bool("birth", true) {
+        cfg.identity.birth_topic = None;
+    }
     cfg.identity.device_id = r.string("device_id");
     if let Some(id) = &cfg.identity.device_id {
         if !valid_object_id(id) {
@@ -559,6 +565,26 @@ mqtt-metrics.system_uptime.icon='mdi:timer'
         let over = &cfg.metrics["system_uptime"];
         assert_eq!(over.publish, Some(false));
         assert_eq!(over.name.as_deref(), Some("Router Uptime"));
+    }
+
+    #[test]
+    fn the_birth_subscription_can_be_switched_off() {
+        let on = from_uci_text("mqtt-metrics.identity=identity\n").unwrap();
+        assert_eq!(
+            on.identity.birth_topic.as_deref(),
+            Some("homeassistant/status")
+        );
+        for text in [
+            "mqtt-metrics.identity=identity\nmqtt-metrics.identity.birth='0'\n",
+            "mqtt-metrics.identity=identity\nmqtt-metrics.identity.birth_topic=''\n",
+        ] {
+            assert_eq!(from_uci_text(text).unwrap().identity.birth_topic, None);
+        }
+        let custom = from_uci_text(
+            "mqtt-metrics.identity=identity\nmqtt-metrics.identity.birth_topic='ha/status'\n",
+        )
+        .unwrap();
+        assert_eq!(custom.identity.birth_topic.as_deref(), Some("ha/status"));
     }
 
     #[test]

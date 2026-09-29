@@ -15,7 +15,7 @@
 //! Everything else is opt-in; `recommended` marks the set that the LuCI
 //! "Recommended set" action turns on.
 
-use crate::text::sanitize_id;
+use crate::text::{sanitize_id, sanitize_topic_level};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Group {
@@ -1013,10 +1013,29 @@ impl Instance {
 
 /// Expand a template for an instance.
 pub fn expand(template: &str, inst: &Instance) -> String {
+    expand_with(template, inst, false)
+}
+
+/// Expand a topic template. Instance names come from the system (device and
+/// service names, WireGuard peer descriptions); characters that are not
+/// allowed in a topic level are replaced so a name can never produce a
+/// wildcard or an extra level.
+pub fn expand_topic(template: &str, inst: &Instance) -> String {
+    expand_with(template, inst, true)
+}
+
+fn expand_with(template: &str, inst: &Instance, topic: bool) -> String {
     let (p, big_p) = match inst.family {
         Some(Family::Wan) => ("wan", "WAN"),
         Some(Family::Iface) => ("iface", "Interface"),
         None => ("", ""),
+    };
+    let raw = |value: &str| {
+        if topic {
+            sanitize_topic_level(value)
+        } else {
+            value.to_string()
+        }
     };
     let mut out = String::with_capacity(template.len() + inst.name.len() * 2);
     let mut rest = template;
@@ -1028,11 +1047,11 @@ pub fn expand(template: &str, inst: &Instance) -> String {
         } else if tail.starts_with("{P}") {
             (big_p.to_string(), 3)
         } else if tail.starts_with("{n}") {
-            (inst.name.clone(), 3)
+            (raw(&inst.name), 3)
         } else if tail.starts_with("{i}") {
             (sanitize_id(&inst.name), 3)
         } else if tail.starts_with("{m}") {
-            (inst.sub.clone(), 3)
+            (raw(&inst.sub), 3)
         } else if tail.starts_with("{j}") {
             (sanitize_id(&inst.sub), 3)
         } else {

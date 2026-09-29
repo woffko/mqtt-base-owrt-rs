@@ -49,7 +49,7 @@ pub fn methods() -> Value {
         "log": {},
         "test_connection": {
             "host": "str", "port": 1883, "username": "str", "password": "str",
-            "keep_password": true, "client_id": "str", "tls": true
+            "keep_password": true, "tls": true, "tls_verify": true
         },
         "set_password": { "password": "str" },
         "import_legacy": {},
@@ -145,9 +145,9 @@ fn entry_json(e: &Entry, cfg: &Config, last: Option<&Value>) -> Value {
     let defaults_over = cfg.metrics.get(&e.key).cloned().unwrap_or_default();
     let (available, reason, permanent) = match &e.reading {
         collect::Reading::Value(_) => (true, None, false),
-        collect::Reading::Unavailable { reason, permanent } => {
-            (false, Some(reason.clone()), *permanent)
-        }
+        collect::Reading::Unavailable {
+            reason, permanent, ..
+        } => (false, Some(reason.clone()), *permanent),
     };
     json!({
         "key": e.key,
@@ -161,8 +161,8 @@ fn entry_json(e: &Entry, cfg: &Config, last: Option<&Value>) -> Value {
         "object_id": e.object_id,
         "default_object_id": engine::default_object(e.def, &e.inst),
         "topic": e.state_topic,
-        "default_topic": catalog_expand(e.def.topic, e),
-        "topic_suffix": defaults_over.topic.clone().unwrap_or_else(|| catalog_expand(e.def.topic, e)),
+        "default_topic": crate::catalog::expand_topic(e.def.topic, &e.inst),
+        "topic_suffix": defaults_over.topic.clone().unwrap_or_else(|| crate::catalog::expand_topic(e.def.topic, &e.inst)),
         "unique_id": e.unique_id,
         "icon": e.icon,
         "default_icon": e.def.icon,
@@ -362,9 +362,14 @@ fn preview(source: &dyn Source, args: &Value) -> Value {
 
 fn legacy_status() -> Value {
     let d = legacy::detect();
-    let broker = std::fs::read_to_string(legacy::SCRIPT)
+    let parsed = std::fs::read_to_string(legacy::SCRIPT)
         .ok()
-        .and_then(|t| legacy::parse_script(&t));
+        .map(|t| legacy::parse_script(&t));
+    let import_error = match &parsed {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
+    };
+    let broker = parsed.and_then(Result::ok);
     json!({
         "script": d.script,
         "marker": d.marker,
@@ -372,6 +377,7 @@ fn legacy_status() -> Value {
         "rc_local": d.rc_local,
         "active": d.cron,
         "importable": broker.is_some(),
+        "import_error": import_error,
         "broker_host": broker.as_ref().map(|b| b.host.clone()),
         "broker_username": broker.as_ref().and_then(|b| b.username.clone()),
     })
@@ -403,6 +409,14 @@ fn arg_str(args: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The stored password is only presented to the broker it was saved for. A
+/// caller with write access to this app must not be able to make the router
+/// send it to another host, or to the same host without the TLS the saved
+/// configuration uses.
+fn stored_password_allowed(cfg: &Config, host: &str, port: u16, tls: bool) -> bool {
+    host == cfg.broker.host && port == cfg.broker.port && (tls || !cfg.broker.tls.enabled)
+}
+
 fn test_connection(args: &Value) -> Value {
     let (cfg, _) = load_config(&SystemSource);
     let host = arg_str(args, "host").unwrap_or_else(|| cfg.broker.host.clone());
@@ -417,18 +431,37 @@ fn test_connection(args: &Value) -> Value {
         })
         .and_then(|p| u16::try_from(p).ok())
         .unwrap_or(cfg.broker.port);
+    let tls_on = args
+        .get("tls")
+        .and_then(Value::as_bool)
+        .unwrap_or(cfg.broker.tls.enabled);
     let keep = args
         .get("keep_password")
         .and_then(Value::as_bool)
         .unwrap_or(true);
     let password = if keep {
-        config::read_secret(SECRET_PATH).ok().flatten()
+        let stored = config::read_secret(SECRET_PATH).ok().flatten();
+        if stored.is_some() && !stored_password_allowed(&cfg, &host, port, tls_on) {
+            return json!({
+                "ok": false,
+                "error": "the stored password is only used for the saved broker address; type the password to test another address",
+            });
+        }
+        stored
     } else {
         args.get("password")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     };
+    let tls = tls_on.then(|| {
+        let mut broker = cfg.broker.clone();
+        broker.tls.enabled = true;
+        if let Some(verify) = args.get("tls_verify").and_then(Value::as_bool) {
+            broker.tls.verify = verify;
+        }
+        broker.tls_settings()
+    });
     let opts = Options {
         host: host.clone(),
         port,
@@ -439,15 +472,8 @@ fn test_connection(args: &Value) -> Value {
         password,
         will: None,
         connect_timeout: Duration::from_secs(5),
-        tls: match args.get("tls").and_then(Value::as_bool) {
-            Some(false) => None,
-            Some(true) => {
-                let mut broker = cfg.broker.clone();
-                broker.tls.enabled = true;
-                broker.tls_settings()
-            }
-            None => cfg.broker.tls_settings(),
-        },
+        // CA and client certificate files come from the saved configuration.
+        tls: tls.flatten(),
     };
     let started = Instant::now();
     match Client::connect(&opts) {
@@ -582,5 +608,30 @@ mod tests {
     #[test]
     fn method_list_is_an_object() {
         assert!(methods().as_object().unwrap().contains_key("catalog"));
+    }
+
+    #[test]
+    fn the_stored_password_stays_with_its_broker() {
+        let mut cfg = Config::default();
+        cfg.broker.host = "broker.example".into();
+        cfg.broker.port = 1883;
+        assert!(stored_password_allowed(&cfg, "broker.example", 1883, false));
+        assert!(stored_password_allowed(&cfg, "broker.example", 1883, true));
+        assert!(!stored_password_allowed(&cfg, "other.example", 1883, false));
+        assert!(!stored_password_allowed(
+            &cfg,
+            "broker.example",
+            8883,
+            false
+        ));
+        cfg.broker.tls.enabled = true;
+        // Downgrading a TLS connection would send the password in the clear.
+        assert!(!stored_password_allowed(
+            &cfg,
+            "broker.example",
+            1883,
+            false
+        ));
+        assert!(stored_password_allowed(&cfg, "broker.example", 1883, true));
     }
 }

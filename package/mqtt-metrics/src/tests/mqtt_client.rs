@@ -90,6 +90,8 @@ enum Event {
 struct Behaviour {
     connack_code: u8,
     ack_publishes: bool,
+    /// Return code granted in SUBACK (0x80 = failure, e.g. denied by an ACL).
+    suback_code: u8,
 }
 
 fn broker(behaviour: Behaviour) -> (u16, mpsc::Receiver<Event>) {
@@ -140,7 +142,8 @@ fn broker(behaviour: Behaviour) -> (u16, mpsc::Receiver<Event>) {
                     let id = [body[0], body[1]];
                     let mut pos = 2;
                     let filter = String::from_utf8(field(&body, &mut pos)).unwrap();
-                    s.write_all(&[0x90, 3, id[0], id[1], 0]).unwrap();
+                    s.write_all(&[0x90, 3, id[0], id[1], behaviour.suback_code])
+                        .unwrap();
                     // Retained birth (must be ignored by the daemon) and a live one.
                     let mut out = Vec::new();
                     codec::encode_publish(&filter, b"online", 0, true, None, &mut out).unwrap();
@@ -203,6 +206,7 @@ fn connect_publish_subscribe_ping_disconnect() {
     let (port, events) = broker(Behaviour {
         connack_code: 0,
         ack_publishes: true,
+        suback_code: 0,
     });
     let mut client = Client::connect(&options(port)).unwrap();
     match events.recv_timeout(WAIT).unwrap() {
@@ -283,6 +287,7 @@ fn refused_credentials() {
     let (port, _events) = broker(Behaviour {
         connack_code: 5,
         ack_publishes: true,
+        suback_code: 0,
     });
     match Client::connect(&options(port)) {
         Err(MqttError::Refused(5)) => {}
@@ -296,6 +301,7 @@ fn missing_acks_are_detected() {
     let (port, _events) = broker(Behaviour {
         connack_code: 0,
         ack_publishes: false,
+        suback_code: 0,
     });
     let mut client = Client::connect(&options(port)).unwrap();
     client.publish("t", b"x", 1, false).unwrap();
@@ -316,4 +322,25 @@ fn unreachable_broker_fails_fast() {
     let started = std::time::Instant::now();
     assert!(Client::connect(&options(port)).is_err());
     assert!(started.elapsed() < Duration::from_secs(6));
+}
+
+#[test]
+fn a_denied_subscription_does_not_drop_the_connection() {
+    let (port, _events) = broker(Behaviour {
+        connack_code: 0,
+        ack_publishes: true,
+        suback_code: 0x80,
+    });
+    let mut client = Client::connect(&options(port)).unwrap();
+    client.subscribe("homeassistant/status").unwrap();
+    for _ in 0..10 {
+        // A broker ACL that denies the birth topic must not cost us the
+        // connection: publishing is what matters.
+        client
+            .poll(Duration::from_millis(100))
+            .expect("a denied subscription is not a connection error");
+    }
+    assert!(client.subscription_denied);
+    client.publish("openwrt/r1/x", b"1", 1, true).unwrap();
+    client.drain(WAIT).unwrap();
 }

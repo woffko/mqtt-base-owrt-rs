@@ -8,14 +8,14 @@
 use serde_json::Value as Json;
 
 use super::net::{self, NetView};
-use super::{reason, Context, GroupResult, Reading, RoundCache, Value};
+use super::{Context, GroupResult, Reading, RoundCache, Value};
 use crate::catalog::*;
 
 pub fn collect(ctx: &Context, cache: &mut RoundCache, out: &mut GroupResult) {
     let view = match cache.net(ctx) {
         Ok(v) => v,
         Err(e) => {
-            out.miss_group(Group::Interface, &reason(e));
+            out.miss_group_err(Group::Interface, e);
             return;
         }
     };
@@ -25,6 +25,24 @@ pub fn collect(ctx: &Context, cache: &mut RoundCache, out: &mut GroupResult) {
     }
     for (name, family) in &view.selected {
         interface(view, name, *family, out);
+    }
+}
+
+/// An address-like reading: a value that exists is always published; a
+/// missing one is permanent only when the protocol cannot provide it.
+fn address(
+    value: Option<String>,
+    impossible: bool,
+    proto: &str,
+    family: &str,
+    absent: &str,
+) -> Reading {
+    match value.filter(|v| !v.is_empty()) {
+        Some(v) => Reading::Value(Value::Text(v)),
+        None if impossible => {
+            Reading::impossible(format!("{proto} interfaces carry no {family} address"))
+        }
+        None => Reading::missing(absent),
     }
 }
 
@@ -42,12 +60,17 @@ fn interface(view: &NetView, name: &str, family: Family, out: &mut GroupResult) 
             (&IFACE_IPV6, no_v6, "global IPv6"),
             (&IFACE_GW6, no_v6, "global IPv6"),
         ] {
-            let reading = if impossible {
-                Reading::impossible(format!("{proto} interfaces have no {family}"))
-            } else {
-                Reading::missing("interface is not known to netifd")
-            };
-            out.push(def, inst(), reading);
+            out.push(
+                def,
+                inst(),
+                address(
+                    None,
+                    impossible,
+                    &proto,
+                    family,
+                    "interface is not known to netifd",
+                ),
+            );
         }
         for def in [
             &IFACE_DEVICE,
@@ -75,26 +98,8 @@ fn interface(view: &NetView, name: &str, family: Family, out: &mut GroupResult) 
         ),
     );
 
-    let v4 = |value: Option<String>, what: &str| {
-        if no_v4 {
-            Reading::impossible(format!(
-                "{} interfaces have no IPv4",
-                view.proto(name).unwrap_or_default()
-            ))
-        } else {
-            Reading::non_empty(value.unwrap_or_default(), what)
-        }
-    };
-    let v6 = |value: Option<String>, what: &str| {
-        if no_v6 {
-            Reading::impossible(format!(
-                "{} interfaces carry no global IPv6",
-                view.proto(name).unwrap_or_default()
-            ))
-        } else {
-            Reading::non_empty(value.unwrap_or_default(), what)
-        }
-    };
+    let v4 = |value: Option<String>, what: &str| address(value, no_v4, &proto, "IPv4", what);
+    let v6 = |value: Option<String>, what: &str| address(value, no_v6, &proto, "global IPv6", what);
     out.push(
         &IFACE_IPV4,
         inst(),
@@ -123,7 +128,7 @@ fn interface(view: &NetView, name: &str, family: Family, out: &mut GroupResult) 
     out.push(
         &IFACE_PROTO,
         inst(),
-        Reading::non_empty(view.proto(name).unwrap_or_default(), "no protocol"),
+        Reading::non_empty(proto.clone(), "no protocol"),
     );
     let uptime = dump.get("uptime").and_then(Json::as_i64).filter(|_| up);
     out.push(
@@ -256,5 +261,47 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    // ---- audit regression tests ------------------------------------------
+
+    use crate::collect::tests::Scratch;
+    use serde_json::json;
+
+    #[test]
+    fn an_address_that_exists_is_never_hidden_by_the_protocol_rule() {
+        let s = Scratch::new("primary", "iface-value");
+        // PPPoE with a static global IPv6 address, and DS-Lite with IPv4.
+        s.write(
+            "uci_network",
+            "network.wan=interface\nnetwork.wan.proto='pppoe'\nnetwork.wan_d=interface\nnetwork.wan_d.proto='dslite'\n",
+        );
+        s.edit_json("network_interface_dump.json", |doc| {
+            for iface in doc["interface"].as_array_mut().unwrap() {
+                if iface["interface"] == "wan" {
+                    iface["ipv6-address"] = json!([{"address": "2001:db8:1::5", "mask": 64}]);
+                }
+            }
+            let mut d = doc["interface"][0].clone();
+            d["interface"] = json!("wan_d");
+            d["proto"] = json!("dslite");
+            d["ipv4-address"] = json!([{"address": "192.0.0.2", "mask": 32}]);
+            doc["interface"].as_array_mut().unwrap().push(d);
+        });
+        let r = run(
+            Group::Interface,
+            &s.source,
+            &Config::default(),
+            &mut CollectorState::default(),
+            0.0,
+        );
+        assert_eq!(
+            payload(value_of(&r, "iface.ipv6", "wan", "")).as_deref(),
+            Some("2001:db8:1::5")
+        );
+        assert_eq!(
+            payload(value_of(&r, "iface.ipv4", "wan_d", "")).as_deref(),
+            Some("192.0.0.2")
+        );
     }
 }

@@ -108,6 +108,10 @@ pub struct Client {
     last_tx: Instant,
     ping_sent: Option<Instant>,
     pub sent: u64,
+    /// The broker refused a subscription (for example an ACL that does not
+    /// allow the Home Assistant birth topic). Publishing keeps working, so the
+    /// connection is kept and the caller decides what to report.
+    pub subscription_denied: bool,
 }
 
 impl Client {
@@ -147,6 +151,7 @@ impl Client {
             last_tx: Instant::now(),
             ping_sent: None,
             sent: 0,
+            subscription_denied: false,
         };
         let will = opts.will.as_ref().map(|w| Will {
             topic: &w.topic,
@@ -273,9 +278,7 @@ impl Client {
             }
             Packet::SubAck { codes, .. } => {
                 if codes.contains(&0x80) {
-                    return Err(MqttError::Protocol(
-                        "broker rejected the subscription".to_string(),
-                    ));
+                    self.subscription_denied = true;
                 }
                 Ok(None)
             }

@@ -31,6 +31,7 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
     let list = match ctx.source.ubus("service", "list", None) {
         Ok(l) => l,
         Err(e) => {
+            out.failed |= matches!(e, crate::source::SourceError::Failed(_));
             out.miss(&SERVICE_RUNNING, e.to_string());
             return;
         }

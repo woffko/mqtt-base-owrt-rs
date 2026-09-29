@@ -17,7 +17,8 @@ pub struct UciIface {
     pub name: String,
     pub proto: Option<String>,
     pub device: Option<String>,
-    /// Static IPv6 configuration (`ip6addr`, `ip6gw`, `ip6prefix`).
+    /// IPv6 configured on the interface itself: static addresses, a static
+    /// gateway or prefix, or a prefix delegated to it (`ip6assign`).
     pub static_v6: bool,
 }
 
@@ -54,7 +55,7 @@ pub fn view(source: &dyn Source, cfg: &Config) -> SourceResult<NetView> {
             name: s.name.clone(),
             proto: s.get("proto").map(str::to_string),
             device: s.get("device").map(str::to_string),
-            static_v6: ["ip6addr", "ip6gw", "ip6prefix"]
+            static_v6: ["ip6addr", "ip6gw", "ip6prefix", "ip6assign"]
                 .iter()
                 .any(|o| s.get(o).is_some()),
         })
@@ -123,10 +124,15 @@ impl NetView {
     }
 }
 
-const V6_ONLY: &[&str] = &["dhcpv6", "6in4", "6to4", "6rd", "dslite", "map", "464xlat"];
+/// Protocols whose interface carries only IPv6. DS-Lite, MAP and 464XLAT are
+/// deliberately not listed: they deliver IPv4 over IPv6 and the interface
+/// holds an IPv4 address and default route.
+const V6_ONLY: &[&str] = &["dhcpv6", "6in4", "6to4", "6rd"];
 const V4_ONLY: &[&str] = &["dhcp", "pppoe", "pppoa", "pptp", "l2tp"];
 
-/// Address families an interface can never have, derived from its protocol.
+/// Address families an interface is not expected to have, derived from its
+/// protocol. This only decides whether a *missing* address is permanent (the
+/// entity is not announced); an address that exists is always published.
 /// Returns `(ipv4_impossible, ipv6_impossible)`.
 pub fn impossible_families(view: &NetView, name: &str) -> (bool, bool) {
     let proto = view.proto(name).unwrap_or_default();
@@ -282,5 +288,41 @@ mod tests {
         assert_eq!(ipv6_addresses(wan6).len(), 2);
         assert!(gateway(wan6, "::").unwrap().starts_with("fe80::"));
         assert_eq!(first_ipv4(wan6), None);
+    }
+
+    // ---- audit regression tests ------------------------------------------
+
+    use crate::collect::tests::Scratch;
+
+    fn view_with(uci: &str) -> NetView {
+        let s = Scratch::new("primary", "net-view");
+        s.write("uci_network", uci);
+        view(&s.source, &Config::default()).unwrap()
+    }
+
+    #[test]
+    fn tunnels_that_carry_ipv4_are_not_ipv6_only() {
+        for proto in ["dslite", "map", "464xlat"] {
+            let v = view_with(&format!(
+                "network.wan_t=interface\nnetwork.wan_t.proto='{proto}'\n"
+            ));
+            assert_eq!(impossible_families(&v, "wan_t"), (false, false), "{proto}");
+        }
+        for proto in ["dhcpv6", "6in4", "6to4", "6rd"] {
+            let v = view_with(&format!(
+                "network.wan_t=interface\nnetwork.wan_t.proto='{proto}'\n"
+            ));
+            assert_eq!(impossible_families(&v, "wan_t"), (true, false), "{proto}");
+        }
+    }
+
+    #[test]
+    fn a_static_interface_with_a_delegated_prefix_can_have_ipv6() {
+        let v = view_with(
+            "network.lan=interface\nnetwork.lan.proto='static'\nnetwork.lan.ip6assign='60'\n",
+        );
+        assert_eq!(impossible_families(&v, "lan"), (false, false));
+        let v = view_with("network.lan=interface\nnetwork.lan.proto='static'\n");
+        assert_eq!(impossible_families(&v, "lan"), (false, true));
     }
 }

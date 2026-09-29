@@ -5,7 +5,7 @@
 
 use serde_json::Value as Json;
 
-use super::{Context, GroupResult, Reading, Value};
+use super::{clock_is_set, Context, GroupResult, Reading, Value};
 use crate::catalog::*;
 use crate::source::SourceError;
 
@@ -29,7 +29,7 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
             return;
         }
         Err(e) => {
-            out.miss_group(Group::WireGuard, &e.to_string());
+            out.miss_group_err(Group::WireGuard, &e);
             return;
         }
     };
@@ -57,6 +57,11 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
             let inst = || Instance::named(iface).with_sub(&name);
             let handshake = number(peer.get("latest_handshake")).filter(|t| *t > 0);
             match handshake {
+                Some(_) if !clock_is_set(ctx.now) => {
+                    let why = "the system clock is not set";
+                    out.push(&WG_PEER_HANDSHAKE, inst(), Reading::missing(why));
+                    out.push(&WG_PEER_CONNECTED, inst(), Reading::missing(why));
+                }
                 Some(ts) => {
                     let age = ctx.now.saturating_sub(ts);
                     out.push(

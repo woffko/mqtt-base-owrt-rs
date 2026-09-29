@@ -26,7 +26,7 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
         Err(e) => out.push(
             &PACKAGES_UPGRADABLE,
             Instance::none(),
-            Reading::missing(e.to_string()),
+            Reading::from_error(&e),
         ),
     }
 }

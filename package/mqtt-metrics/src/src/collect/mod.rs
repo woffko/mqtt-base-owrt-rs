@@ -50,12 +50,21 @@ impl Value {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reading {
     Value(Value),
-    /// No value right now. `permanent` means the entity can never have a
-    /// value on this router (for example IPv4 on a DHCPv6-only interface), so
-    /// it is not announced to Home Assistant.
+    /// No value right now.
+    ///
+    /// - `permanent`: the entity can never have a value on this router (for
+    ///   example IPv4 on a DHCPv6-only interface), so it is not announced to
+    ///   Home Assistant.
+    /// - `failed`: the source could not be read (timeout, garbled answer). The
+    ///   last published value is kept instead of being cleared, because the
+    ///   value did not go away.
+    ///
+    /// Neither: the value is absent (interface down, target not answering); a
+    /// value published earlier is cleared once.
     Unavailable {
         reason: String,
         permanent: bool,
+        failed: bool,
     },
 }
 
@@ -64,17 +73,38 @@ impl Reading {
         Reading::Value(Value::Text(value.into()))
     }
 
+    /// The value is absent right now.
     pub fn missing(reason: impl Into<String>) -> Reading {
         Reading::Unavailable {
             reason: reason.into(),
             permanent: false,
+            failed: false,
         }
     }
 
+    /// The value cannot exist on this router.
     pub fn impossible(reason: impl Into<String>) -> Reading {
         Reading::Unavailable {
             reason: reason.into(),
             permanent: true,
+            failed: false,
+        }
+    }
+
+    /// The source could not be read; the previous value is kept.
+    pub fn failed(reason: impl Into<String>) -> Reading {
+        Reading::Unavailable {
+            reason: reason.into(),
+            permanent: false,
+            failed: true,
+        }
+    }
+
+    /// A missing source is an absent value; any other error is a failed read.
+    pub fn from_error(err: &SourceError) -> Reading {
+        match err {
+            SourceError::Missing(_) => Reading::missing(err.to_string()),
+            SourceError::Failed(_) => Reading::failed(err.to_string()),
         }
     }
 
@@ -106,6 +136,9 @@ pub struct GroupResult {
     pub samples: Vec<Sample>,
     /// Templates without any instance on this router, with the reason.
     pub missing: Vec<(&'static MetricDef, String)>,
+    /// A source failed (as opposed to being absent): instances that are
+    /// missing from this result have not necessarily gone away.
+    pub failed: bool,
 }
 
 impl GroupResult {
@@ -122,6 +155,13 @@ impl GroupResult {
         for def in ALL.iter().copied().filter(|d| d.group == group) {
             self.miss(def, reason);
         }
+    }
+
+    /// Mark every template of `group` as missing because reading `err`
+    /// failed or the source is absent.
+    fn miss_group_err(&mut self, group: Group, err: &SourceError) {
+        self.failed |= matches!(err, SourceError::Failed(_));
+        self.miss_group(group, &err.to_string());
     }
 }
 
@@ -191,6 +231,15 @@ pub fn collect(
     out
 }
 
+/// 2020-01-01T00:00:00Z. A router without a battery-backed clock starts near
+/// 1970 until NTP sets the time; values derived from the wall clock are not
+/// meaningful before that.
+const CLOCK_SET_AFTER: u64 = 1_577_836_800;
+
+pub fn clock_is_set(now: u64) -> bool {
+    now >= CLOCK_SET_AFTER
+}
+
 /// Runtime hostname, as the legacy script resolves it.
 pub fn hostname(source: &dyn Source) -> String {
     if let Ok(name) = source.command("uci", &["-q", "get", "system.@system[0].hostname"]) {
@@ -208,22 +257,74 @@ pub fn hostname(source: &dyn Source) -> String {
     "openwrt".to_string()
 }
 
-/// Human-readable reason for a failed source call.
-fn reason(err: &SourceError) -> String {
-    err.to_string()
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::source::FixtureSource;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     pub fn fixture(node: &str) -> FixtureSource {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../tests/fixtures")
             .join(node);
         FixtureSource::new(&dir)
+    }
+
+    /// A private copy of a fixture directory that a test may modify between
+    /// collection rounds. The copy is removed on drop.
+    pub struct Scratch {
+        pub dir: PathBuf,
+        pub source: FixtureSource,
+    }
+
+    impl Scratch {
+        pub fn new(node: &str, tag: &str) -> Scratch {
+            let from = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../tests/fixtures")
+                .join(node);
+            // Tests run in parallel: every copy gets its own directory.
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "mqtt-metrics-scratch-{}-{}-{tag}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            for entry in std::fs::read_dir(&from).unwrap() {
+                let entry = entry.unwrap();
+                if entry.path().is_file() {
+                    std::fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+                }
+            }
+            let source = FixtureSource::new(&dir);
+            Scratch { dir, source }
+        }
+
+        pub fn json(&self, name: &str) -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(self.dir.join(name)).unwrap()).unwrap()
+        }
+
+        pub fn write_json(&self, name: &str, doc: &serde_json::Value) {
+            std::fs::write(self.dir.join(name), doc.to_string()).unwrap();
+        }
+
+        pub fn write(&self, name: &str, text: &str) {
+            std::fs::write(self.dir.join(name), text).unwrap();
+        }
+
+        /// Modify one JSON fixture in place.
+        pub fn edit_json(&self, name: &str, edit: impl FnOnce(&mut serde_json::Value)) {
+            let mut doc = self.json(name);
+            edit(&mut doc);
+            self.write_json(name, &doc);
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
     }
 
     pub fn run(

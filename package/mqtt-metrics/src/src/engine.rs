@@ -7,10 +7,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::catalog::{self, expand, Family, Group, Instance, MetricDef};
+use crate::catalog::{self, expand, expand_topic, Family, Group, Instance, MetricDef};
 use crate::collect::{self, net, CollectorState, Context, Reading, RoundCache, Sample};
 use crate::config::Config;
 use crate::ha::{self, EntityView, Identity};
+use crate::legacy;
 use crate::source::Source;
 use crate::state::TopicState;
 use crate::text::{sanitize_id, sanitize_key};
@@ -114,7 +115,7 @@ pub fn resolve(sample: Sample, cfg: &Config, id: &Identity) -> Entry {
     let suffix = over
         .topic
         .clone()
-        .unwrap_or_else(|| expand(def.topic, &sample.inst));
+        .unwrap_or_else(|| expand_topic(def.topic, &sample.inst));
     Entry {
         config_topic: id.config_topic(def.kind, &unique_id),
         state_topic: format!("{}/{suffix}", id.base),
@@ -145,6 +146,29 @@ pub struct Round {
     /// UCI interfaces matching the legacy WAN rule (when the network view
     /// was available).
     pub legacy_wan: Option<Vec<String>>,
+    /// Groups whose source could not be read. Instances missing from such a
+    /// group have not necessarily gone away.
+    pub failed: Vec<Group>,
+}
+
+/// Distinct instances can collapse to the same key once their names are
+/// sanitized (two WireGuard peers with the same description, `eth0.1` and
+/// `eth0_1`). Number the later ones so that every instance keeps its own
+/// entity instead of silently overwriting the earlier one.
+fn unique_instance(seen: &mut BTreeSet<String>, def: &MetricDef, inst: Instance) -> Instance {
+    let mut candidate = inst.clone();
+    let mut n = 1;
+    while !seen.insert(metric_key(def, &candidate)) {
+        n += 1;
+        candidate = inst.clone();
+        let suffix = format!("_{n}");
+        if candidate.sub.is_empty() {
+            candidate.name.push_str(&suffix);
+        } else {
+            candidate.sub.push_str(&suffix);
+        }
+    }
+    candidate
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -166,11 +190,20 @@ pub fn collect_round(
     };
     let mut cache = RoundCache::default();
     let mut round = Round::default();
+    let mut seen = BTreeSet::new();
     for group in groups {
         let result = collect::collect(*group, &ctx, &mut cache, state);
-        round
-            .entries
-            .extend(result.samples.into_iter().map(|s| resolve(s, cfg, id)));
+        if result.failed {
+            round.failed.push(*group);
+        }
+        for sample in result.samples {
+            let inst = unique_instance(&mut seen, sample.def, sample.inst);
+            round.entries.push(resolve(
+                Sample::new(sample.def, inst, sample.reading),
+                cfg,
+                id,
+            ));
+        }
         round
             .missing
             .extend(result.missing.into_iter().map(|(d, r)| (*group, d, r)));
@@ -205,10 +238,22 @@ pub fn legacy_topics(hostname: &str, wan: &[String]) -> BTreeSet<String> {
         for inst in instances {
             let unique_id = format!("{}_{}", id.device_id, default_object(def, &inst));
             out.insert(id.config_topic(def.kind, &unique_id));
-            out.insert(format!("{}/{}", id.base, expand(def.topic, &inst)));
+            out.insert(format!("{}/{}", id.base, expand_topic(def.topic, &inst)));
         }
     }
     out
+}
+
+/// What the broker holds for an entry's state topic.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum Held {
+    /// Not known yet (fresh start): the persisted set of owned topics decides.
+    #[default]
+    Unknown,
+    /// No retained value.
+    Nothing,
+    /// We left a retained value on this topic.
+    On(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -217,6 +262,34 @@ struct Track {
     last_publish: Option<f64>,
     published_at: Option<u64>,
     announced: Option<String>,
+    held: Held,
+}
+
+impl Track {
+    /// The retained value is gone (cleared or never there).
+    fn forget_state(&mut self) {
+        self.held = Held::Nothing;
+        self.last_payload = None;
+        self.last_publish = None;
+    }
+}
+
+/// Whether the broker may still hold a retained value on `topic`.
+fn holds_state(track: Option<&Track>, owned: &BTreeSet<String>, topic: &str) -> bool {
+    match track.map(|t| &t.held) {
+        Some(Held::Nothing) => false,
+        Some(Held::On(held)) => held == topic,
+        Some(Held::Unknown) | None => owned.contains(topic),
+    }
+}
+
+fn clear_message(topic: &str) -> Publication {
+    Publication {
+        topic: topic.to_string(),
+        payload: String::new(),
+        retain: true,
+        qos: 1,
+    }
 }
 
 /// Snapshot of one entity for status output.
@@ -313,12 +386,7 @@ impl Engine {
     }
 
     fn clear(&self, topic: &str) -> Publication {
-        Publication {
-            topic: topic.to_string(),
-            payload: String::new(),
-            retain: true,
-            qos: 1,
-        }
+        clear_message(topic)
     }
 
     fn state_publication(&self, e: &Entry, payload: String) -> Publication {
@@ -359,9 +427,14 @@ impl Engine {
     /// configuration change and when Home Assistant comes online.
     pub fn full_pass(&mut self, source: &dyn Source, now: u64, mono: f64) -> Vec<Publication> {
         let groups = self.enabled_groups();
+        // Adopting the legacy script's topics clears whatever this
+        // configuration no longer wants. While the script is still scheduled
+        // it would publish them again, so wait until it is gone.
+        let legacy_running = legacy::cron_active(&source.read(legacy::CRONTAB).unwrap_or_default());
         let seed = self.cfg.identity.discovery
             && self.cfg.identity.cleanup_legacy
-            && !self.topics.legacy_seeded;
+            && !self.topics.legacy_seeded
+            && !legacy_running;
         let round = collect_round(
             &groups,
             &self.cfg,
@@ -373,11 +446,20 @@ impl Engine {
             seed,
         );
         self.missing = round.missing;
+        let previous: Vec<String> = self.entries.keys().cloned().collect();
         self.entries = round
             .entries
             .into_iter()
             .map(|e| (e.key.clone(), e))
             .collect();
+        for key in previous {
+            if !self.entries.contains_key(&key) {
+                // Its topics are cleared below when nothing wants them.
+                if let Some(track) = self.tracks.get_mut(&key) {
+                    track.forget_state();
+                }
+            }
+        }
 
         if seed {
             if let Some(wan) = &round.legacy_wan {
@@ -410,6 +492,8 @@ impl Engine {
 
         let mut announced = Vec::new();
         let mut states = Vec::new();
+        let mut clears = Vec::new();
+        let mut forgets = Vec::new();
         for e in self.entries.values() {
             if e.announce(&self.cfg) {
                 let payload = e.discovery_json(&self.id);
@@ -423,9 +507,26 @@ impl Engine {
             } else {
                 announced.push((e.key.clone(), None));
             }
-            if e.publish {
-                if let Some(p) = e.payload() {
-                    states.push((e.key.clone(), self.state_publication(e, p.clone()), p));
+            if !e.publish {
+                continue;
+            }
+            match &e.reading {
+                Reading::Value(_) => {
+                    if let Some(p) = e.payload() {
+                        states.push((e.key.clone(), self.state_publication(e, p.clone()), p));
+                    }
+                }
+                // The read failed: whatever the broker holds is still the
+                // best knowledge.
+                Reading::Unavailable { failed: true, .. } => {}
+                // The value is absent. A value left by an earlier run or
+                // pass is stale and would keep showing as current.
+                Reading::Unavailable { .. } => {
+                    if holds_state(self.tracks.get(&e.key), &self.topics.topics, &e.state_topic) {
+                        clears.push((e.key.clone(), e.state_topic.clone()));
+                    } else {
+                        forgets.push(e.key.clone());
+                    }
                 }
             }
         }
@@ -437,7 +538,15 @@ impl Engine {
             t.last_payload = Some(payload);
             t.last_publish = Some(mono);
             t.published_at = Some(now);
+            t.held = Held::On(publication.topic.clone());
             out.push(publication);
+        }
+        for (key, topic) in clears {
+            self.tracks.entry(key).or_default().forget_state();
+            out.push(self.clear(&topic));
+        }
+        for key in forgets {
+            self.tracks.entry(key).or_default().forget_state();
         }
 
         if self.topics.topics != want {
@@ -473,12 +582,36 @@ impl Engine {
             false,
         );
         let fresh_keys: BTreeSet<String> = round.entries.iter().map(|e| e.key.clone()).collect();
-        self.entries
-            .retain(|k, e| !due.contains(&e.def.group) || fresh_keys.contains(k));
+        let mut out = Vec::new();
+
+        // Instances that disappeared from a group that was read successfully
+        // are gone, and so is their value. A group whose source failed says
+        // nothing about its instances, so they keep their last value.
+        let vanished: Vec<(String, String)> = self
+            .entries
+            .iter()
+            .filter(|(k, e)| {
+                e.publish
+                    && due.contains(&e.def.group)
+                    && !round.failed.contains(&e.def.group)
+                    && !fresh_keys.contains(*k)
+            })
+            .map(|(k, e)| (k.clone(), e.state_topic.clone()))
+            .collect();
+        for (key, topic) in vanished {
+            if holds_state(self.tracks.get(&key), &self.topics.topics, &topic) {
+                out.push(clear_message(&topic));
+            }
+            self.tracks.entry(key).or_default().forget_state();
+        }
+        self.entries.retain(|k, e| {
+            !due.contains(&e.def.group)
+                || fresh_keys.contains(k)
+                || round.failed.contains(&e.def.group)
+        });
         self.missing.retain(|(g, _, _)| !due.contains(g));
         self.missing.extend(round.missing);
 
-        let mut out = Vec::new();
         for e in round.entries {
             let track = self.tracks.entry(e.key.clone()).or_default();
             if e.announce(&self.cfg) {
@@ -496,39 +629,47 @@ impl Engine {
                     }
                 }
             } else if track.announced.take().is_some() {
-                out.push(Publication {
-                    topic: e.config_topic.clone(),
-                    payload: String::new(),
-                    retain: true,
-                    qos: 1,
-                });
+                out.push(clear_message(&e.config_topic));
                 if self.topics.topics.remove(&e.config_topic) {
                     self.topics_dirty = true;
                 }
             }
 
             if e.publish {
-                if let Some(payload) = e.payload() {
-                    let elapsed = track.last_publish.map(|t| mono - t + DUE_SLACK);
-                    let due = if self.cfg.publish.change_only {
-                        track.last_payload.as_deref() != Some(payload.as_str())
-                            || elapsed.is_none_or(|el| el >= f64::from(self.cfg.publish.max_age))
-                    } else {
-                        elapsed.is_none_or(|el| el >= f64::from(e.interval))
-                    };
-                    if due {
-                        track.last_payload = Some(payload.clone());
-                        track.last_publish = Some(mono);
-                        track.published_at = Some(now);
-                        out.push(Publication {
-                            topic: e.state_topic.clone(),
-                            payload,
-                            retain: self.cfg.broker.retain,
-                            qos: self.cfg.broker.qos,
-                        });
-                        if self.topics.topics.insert(e.state_topic.clone()) {
-                            self.topics_dirty = true;
+                match &e.reading {
+                    Reading::Value(_) => {
+                        if let Some(payload) = e.payload() {
+                            let elapsed = track.last_publish.map(|t| mono - t + DUE_SLACK);
+                            let due = if self.cfg.publish.change_only {
+                                track.last_payload.as_deref() != Some(payload.as_str())
+                                    || elapsed
+                                        .is_none_or(|el| el >= f64::from(self.cfg.publish.max_age))
+                            } else {
+                                elapsed.is_none_or(|el| el >= f64::from(e.interval))
+                            };
+                            if due {
+                                track.last_payload = Some(payload.clone());
+                                track.last_publish = Some(mono);
+                                track.published_at = Some(now);
+                                track.held = Held::On(e.state_topic.clone());
+                                out.push(Publication {
+                                    topic: e.state_topic.clone(),
+                                    payload,
+                                    retain: self.cfg.broker.retain,
+                                    qos: self.cfg.broker.qos,
+                                });
+                                if self.topics.topics.insert(e.state_topic.clone()) {
+                                    self.topics_dirty = true;
+                                }
+                            }
                         }
+                    }
+                    Reading::Unavailable { failed: true, .. } => {}
+                    Reading::Unavailable { .. } => {
+                        if holds_state(Some(&*track), &self.topics.topics, &e.state_topic) {
+                            out.push(clear_message(&e.state_topic));
+                        }
+                        track.forget_state();
                     }
                 }
             }
@@ -548,8 +689,7 @@ impl Engine {
         self.topics_dirty = true;
         for t in self.tracks.values_mut() {
             t.announced = None;
-            t.last_payload = None;
-            t.last_publish = None;
+            t.forget_state();
         }
         out
     }
@@ -711,5 +851,245 @@ mod tests {
         assert_eq!(out.len(), owned + 1);
         assert!(out.iter().all(|p| p.payload.is_empty() && p.retain));
         assert!(engine.topics().topics.is_empty());
+    }
+
+    // ---- audit regression tests ------------------------------------------
+
+    use crate::collect::tests::Scratch;
+    use crate::source::{Source, SourceResult};
+    use serde_json::{json, Value};
+
+    fn publishing(keys: &[&str]) -> Config {
+        let mut cfg = Config::default();
+        for key in keys {
+            cfg.metrics.insert(
+                (*key).to_string(),
+                MetricOverride {
+                    publish: Some(true),
+                    ..MetricOverride::default()
+                },
+            );
+        }
+        cfg
+    }
+
+    fn payload_of<'a>(out: &'a [Publication], topic: &str) -> Option<&'a str> {
+        out.iter()
+            .find(|p| p.topic == topic)
+            .map(|p| p.payload.as_str())
+    }
+
+    /// Take an interface down in the netifd dump: no device, addresses or routes.
+    fn take_down(s: &Scratch, name: &str) {
+        s.edit_json("network_interface_dump.json", |doc| {
+            for iface in doc["interface"].as_array_mut().unwrap() {
+                if iface["interface"] == name {
+                    iface["up"] = json!(false);
+                    let obj = iface.as_object_mut().unwrap();
+                    obj.remove("l3_device");
+                    obj.insert("ipv4-address".into(), json!([]));
+                    obj.insert("ipv6-address".into(), json!([]));
+                    obj.insert("route".into(), json!([]));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn a_value_that_disappears_is_cleared_once_and_comes_back() {
+        let s = Scratch::new("primary", "vanish1");
+        let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
+        let first = engine.full_pass(&s.source, s.source.now(), 0.0);
+        let ipv4 = "openwrt/router-primary/wan-wanb/ipv4";
+        assert!(payload_of(&first, ipv4).is_some_and(|p| !p.is_empty()));
+
+        let original = s.json("network_interface_dump.json");
+        take_down(&s, "wanb");
+        let down = engine.tick(&s.source, s.source.now(), 300.0);
+        assert_eq!(
+            payload_of(&down, "openwrt/router-primary/wan-wanb/status"),
+            Some("down")
+        );
+        for field in ["ipv4", "device", "gateway4"] {
+            let topic = format!("openwrt/router-primary/wan-wanb/{field}");
+            let msg = down
+                .iter()
+                .find(|p| p.topic == topic)
+                .unwrap_or_else(|| panic!("{topic}: stale retained value is not cleared"));
+            assert!(msg.payload.is_empty() && msg.retain, "{topic}");
+        }
+        // Cleared once, not again on the next round.
+        let again = engine.tick(&s.source, s.source.now(), 600.0);
+        assert!(!again.iter().any(|p| p.topic.contains("wan-wanb/ipv4")));
+
+        s.write_json("network_interface_dump.json", &original);
+        let up = engine.tick(&s.source, s.source.now(), 900.0);
+        assert!(payload_of(&up, ipv4).is_some_and(|p| !p.is_empty()));
+    }
+
+    #[test]
+    fn restart_while_a_value_is_missing_clears_the_old_retained_state() {
+        let s = Scratch::new("primary", "vanish2");
+        let mut first = Engine::new(Config::default(), "router-primary", TopicState::default());
+        first.full_pass(&s.source, s.source.now(), 0.0);
+        let persisted = first.topics().clone();
+        take_down(&s, "wanb");
+        let mut second = Engine::new(Config::default(), "router-primary", persisted);
+        let out = second.full_pass(&s.source, s.source.now(), 0.0);
+        assert_eq!(
+            payload_of(&out, "openwrt/router-primary/wan-wanb/ipv4"),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn a_failing_source_does_not_blank_published_values() {
+        let s = Scratch::new("primary", "failing");
+        let cfg = publishing(&["system_memory_used", "system_kernel"]);
+        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
+        let first = engine.full_pass(&s.source, s.source.now(), 0.0);
+        let memory = "openwrt/router-primary/system/memory_used";
+        let kernel = "openwrt/router-primary/system/kernel";
+        assert!(payload_of(&first, memory).is_some_and(|p| !p.is_empty()));
+
+        // ubus answers with garbage: the read failed, the value did not vanish.
+        s.write("system_info.json", "not json");
+        s.write("system_board.json", "not json");
+        let out = engine.tick(&s.source, s.source.now(), 300.0);
+        assert_eq!(payload_of(&out, memory), None);
+        assert_eq!(payload_of(&out, kernel), None);
+    }
+
+    #[test]
+    fn a_vanished_instance_is_cleared_but_a_failed_group_is_not() {
+        let s = Scratch::new("primary", "vanished-group");
+        let cfg = publishing(&["mwan3_wan_score", "mwan3_wanb_score"]);
+        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
+        let first = engine.full_pass(&s.source, s.source.now(), 0.0);
+        let wan = "openwrt/router-primary/mwan3-wan/score";
+        let wanb = "openwrt/router-primary/mwan3-wanb/score";
+        assert!(payload_of(&first, wan).is_some_and(|p| !p.is_empty()));
+
+        // mwan3 stops tracking `wan`: its entry disappears from the round.
+        s.edit_json("mwan3_status.json", |doc| {
+            doc["interfaces"].as_object_mut().unwrap().remove("wan");
+        });
+        let out = engine.tick(&s.source, s.source.now(), 300.0);
+        assert_eq!(payload_of(&out, wan), Some(""));
+        assert_eq!(
+            payload_of(&out, wanb).map(str::is_empty),
+            Some(false),
+            "the other instance is unaffected"
+        );
+
+        // A broken answer for the whole group must not blank anything.
+        s.write("mwan3_status.json", "not json");
+        let out = engine.tick(&s.source, s.source.now(), 600.0);
+        assert_eq!(payload_of(&out, wanb), None);
+    }
+
+    #[test]
+    fn duplicate_names_get_distinct_entities() {
+        let s = Scratch::new("primary", "duplicates");
+        s.edit_json("wireguard.json", |doc| {
+            let peers = doc["wireguard"]["peers"].as_array_mut().unwrap();
+            let mut second = peers[0].clone();
+            second["public_key"] = json!("TESTKEY99AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+            peers[0]["name"] = json!("phone");
+            second["name"] = json!("phone");
+            peers.push(second);
+            let mut third = peers[0].clone();
+            third["name"] = json!("ph one");
+            peers.push(third);
+        });
+        let cfg = publishing(&[
+            "wg_wireguard_phone_connected",
+            "wg_wireguard_phone_2_connected",
+            "wg_wireguard_ph_one_connected",
+        ]);
+        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
+        let out = engine.full_pass(&s.source, s.source.now(), 0.0);
+        let states: BTreeSet<&str> = out
+            .iter()
+            .filter(|p| p.topic.contains("/connected") && !p.topic.ends_with("/config"))
+            .map(|p| p.topic.as_str())
+            .collect();
+        assert_eq!(states.len(), 3, "{states:#?}");
+        let configs: BTreeSet<String> = out
+            .iter()
+            .filter(|p| p.topic.ends_with("/config") && p.topic.contains("connected"))
+            .map(|p| p.topic.clone())
+            .collect();
+        assert_eq!(configs.len(), 3, "{configs:#?}");
+    }
+
+    struct WithCron<'a> {
+        inner: &'a dyn Source,
+        crontab: &'a str,
+    }
+
+    impl Source for WithCron<'_> {
+        fn ubus(&self, o: &str, m: &str, a: Option<&str>) -> SourceResult<Value> {
+            self.inner.ubus(o, m, a)
+        }
+        fn read(&self, path: &str) -> SourceResult<String> {
+            if path == "/etc/crontabs/root" {
+                Ok(self.crontab.to_string())
+            } else {
+                self.inner.read(path)
+            }
+        }
+        fn list_dir(&self, path: &str) -> SourceResult<Vec<String>> {
+            self.inner.list_dir(path)
+        }
+        fn command(&self, program: &str, args: &[&str]) -> SourceResult<String> {
+            self.inner.command(program, args)
+        }
+        fn now(&self) -> u64 {
+            self.inner.now()
+        }
+    }
+
+    #[test]
+    fn legacy_adoption_waits_until_the_legacy_cron_line_is_gone() {
+        let src = fixture("primary");
+        let cron = WithCron {
+            inner: &src,
+            crontab:
+                "0 3 * * 3 /etc/init.d/adblock reload\n*/5 * * * * /usr/bin/publish_metrics.sh\n",
+        };
+        let mut cfg = Config::default();
+        cfg.identity.device_id = Some("gw1".into());
+        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
+
+        // The legacy script still publishes: leave its retained topics alone.
+        // Nothing is cleared, and nothing is adopted for later cleaning.
+        let out = engine.full_pass(&cron, src.now(), 0.0);
+        assert!(
+            out.iter().all(|p| !p.payload.is_empty()),
+            "cleared while the legacy script is scheduled: {:#?}",
+            out.iter()
+                .filter(|p| p.payload.is_empty())
+                .collect::<Vec<_>>()
+        );
+        assert!(!out
+            .iter()
+            .any(|p| p.topic.contains("openwrt_router-primary_")));
+        assert!(!engine.topics().legacy_seeded);
+
+        // Once the cron line is removed the leftovers are adopted and cleared.
+        let none = WithCron {
+            inner: &src,
+            crontab: "0 3 * * 3 /etc/init.d/adblock reload\n",
+        };
+        let out = engine.full_pass(&none, src.now(), 10.0);
+        let cleared = out
+            .iter()
+            .filter(|p| p.payload.is_empty() && p.topic.contains("openwrt_router-primary_"))
+            .count();
+        // All 30 legacy discovery configs: the 22 that were announced plus
+        // the 8 that could never have a value.
+        assert_eq!(cleared, 30);
+        assert!(engine.topics().legacy_seeded);
     }
 }

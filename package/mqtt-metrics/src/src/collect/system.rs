@@ -4,7 +4,9 @@
 
 use serde_json::Value as Json;
 
-use super::{hostname, reason, CollectorState, Context, CpuTimes, GroupResult, Reading, Value};
+use super::{
+    clock_is_set, hostname, CollectorState, Context, CpuTimes, GroupResult, Reading, Value,
+};
 use crate::catalog::*;
 use crate::text::rfc3339_utc;
 
@@ -80,7 +82,11 @@ pub fn collect(ctx: &Context, state: &mut CollectorState, out: &mut GroupResult)
             out.push(
                 &SYSTEM_BOOT_TIME,
                 none(),
-                Reading::text(rfc3339_utc(ctx.now.saturating_sub(up))),
+                if clock_is_set(ctx.now) {
+                    Reading::text(rfc3339_utc(ctx.now.saturating_sub(up)))
+                } else {
+                    Reading::missing("the system clock is not set")
+                },
             );
         }
         None => {
@@ -117,7 +123,7 @@ pub fn collect(ctx: &Context, state: &mut CollectorState, out: &mut GroupResult)
                     .to_string(),
                 "no kernel version",
             ),
-            Err(e) => Reading::missing(reason(e)),
+            Err(e) => Reading::from_error(e),
         },
     );
 
@@ -196,7 +202,7 @@ fn cpu(ctx: &Context, state: &mut CollectorState, out: &mut GroupResult) {
     let stat = match ctx.source.read("/proc/stat") {
         Ok(s) => s,
         Err(e) => {
-            out.push(&SYSTEM_CPU, Instance::none(), Reading::missing(reason(&e)));
+            out.push(&SYSTEM_CPU, Instance::none(), Reading::from_error(&e));
             return;
         }
     };
@@ -234,7 +240,6 @@ fn memory_and_storage(ctx: &Context, out: &mut GroupResult) {
     let info = match ctx.source.ubus("system", "info", None) {
         Ok(i) => i,
         Err(e) => {
-            let r = reason(&e);
             for def in [
                 &SYSTEM_MEM_USED,
                 &SYSTEM_MEM_AVAIL,
@@ -242,7 +247,7 @@ fn memory_and_storage(ctx: &Context, out: &mut GroupResult) {
                 &SYSTEM_TMP_USED,
                 &SYSTEM_SWAP_USED,
             ] {
-                out.push(def, Instance::none(), Reading::missing(r.clone()));
+                out.push(def, Instance::none(), Reading::from_error(&e));
             }
             return;
         }
@@ -464,5 +469,28 @@ mod tests {
             Some("r0+1524-b6a820ea85")
         );
         assert_eq!(release_field(text, "DISTRIB_TARGET"), None);
+    }
+
+    // ---- audit regression tests ------------------------------------------
+
+    #[test]
+    fn nothing_is_derived_from_an_unset_clock() {
+        let src = fixture("primary").with_now(1_000);
+        let r = run(
+            Group::System,
+            &src,
+            &Config::default(),
+            &mut CollectorState::default(),
+            0.0,
+        );
+        assert!(matches!(
+            value_of(&r, "system.boot_time", "", ""),
+            Some(Reading::Unavailable { .. })
+        ));
+        // Uptime does not depend on the wall clock.
+        assert!(matches!(
+            value_of(&r, "system.uptime", "", ""),
+            Some(Reading::Value(_))
+        ));
     }
 }

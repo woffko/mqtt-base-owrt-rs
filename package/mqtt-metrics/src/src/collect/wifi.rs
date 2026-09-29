@@ -15,7 +15,7 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
             return;
         }
         Err(e) => {
-            out.miss_group(Group::Wifi, &e.to_string());
+            out.miss_group_err(Group::Wifi, &e);
             return;
         }
     };
@@ -42,8 +42,8 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
                 }
             }
             Err(e) => {
-                out.push(&WIFI_CHANNEL, inst(), Reading::missing(e.to_string()));
-                out.push(&WIFI_TXPOWER, inst(), Reading::missing(e.to_string()));
+                out.push(&WIFI_CHANNEL, inst(), Reading::from_error(&e));
+                out.push(&WIFI_TXPOWER, inst(), Reading::from_error(&e));
             }
         }
         let clients = ctx
@@ -56,7 +56,7 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
             inst(),
             match clients {
                 Some(n) => Reading::Value(Value::Int(i64::try_from(n).unwrap_or(i64::MAX))),
-                None => Reading::missing("no association list"),
+                None => Reading::failed("no association list"),
             },
         );
     }

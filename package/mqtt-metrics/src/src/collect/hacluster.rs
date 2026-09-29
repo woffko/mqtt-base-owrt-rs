@@ -3,7 +3,7 @@
 
 use serde_json::Value as Json;
 
-use super::{Context, GroupResult, Reading, Value};
+use super::{clock_is_set, Context, GroupResult, Reading, Value};
 use crate::catalog::*;
 use crate::source::SourceError;
 
@@ -20,6 +20,8 @@ fn vrrp_state(code: i64) -> String {
 pub fn collect(ctx: &Context, out: &mut GroupResult) {
     let cluster = ctx.source.ubus("ha-cluster", "status", None);
     let keepalived = ctx.source.ubus("keepalived", "dump", None);
+    out.failed = matches!(cluster, Err(SourceError::Failed(_)))
+        || matches!(keepalived, Err(SourceError::Failed(_)));
     if matches!(cluster, Err(SourceError::Missing(_)))
         && matches!(keepalived, Err(SourceError::Missing(_)))
     {
@@ -86,6 +88,9 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
                     .and_then(Json::as_u64)
                     .filter(|t| *t > 0);
                 let reading = match ts {
+                    Some(_) if !clock_is_set(ctx.now) => {
+                        Reading::missing("the system clock is not set")
+                    }
                     Some(t) => Reading::Value(Value::Int(
                         i64::try_from(ctx.now.saturating_sub(t)).unwrap_or(i64::MAX),
                     )),

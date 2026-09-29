@@ -17,7 +17,7 @@ pub fn collect(ctx: &Context, out: &mut GroupResult) {
             return;
         }
         Err(e) => {
-            out.miss_group(Group::Mwan3, &e.to_string());
+            out.miss_group_err(Group::Mwan3, &e);
             return;
         }
     };

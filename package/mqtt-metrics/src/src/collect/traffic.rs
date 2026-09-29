@@ -3,7 +3,7 @@
 
 use serde_json::Value as Json;
 
-use super::{reason, CollectorState, Context, Counters, GroupResult, Reading, RoundCache, Value};
+use super::{CollectorState, Context, Counters, GroupResult, Reading, RoundCache, Value};
 use crate::catalog::*;
 
 pub fn collect(
@@ -16,7 +16,7 @@ pub fn collect(
         match cache.net(ctx) {
             Ok(view) => view.selected_devices(),
             Err(e) => {
-                out.miss_group(Group::Traffic, &reason(e));
+                out.miss_group_err(Group::Traffic, e);
                 return;
             }
         }
@@ -30,7 +30,7 @@ pub fn collect(
     let status = match ctx.source.ubus("network.device", "status", None) {
         Ok(s) => s,
         Err(e) => {
-            out.miss_group(Group::Traffic, &reason(&e));
+            out.miss_group_err(Group::Traffic, &e);
             return;
         }
     };
@@ -143,7 +143,13 @@ fn device(
         inst(),
         match speed {
             Some(s) => Reading::Value(Value::Int(s)),
-            None => Reading::impossible("the device reports no link speed"),
+            // Ethernet, bridge, VLAN and bond devices (netifd reports a
+            // `devtype`) have a speed again when the link comes up; PPP and
+            // tunnel devices never do.
+            None if status.get("devtype").is_some() => {
+                Reading::missing("the link is down or reports no speed")
+            }
+            None => Reading::impossible("the device has no link speed"),
         },
     );
     out.push(
@@ -200,5 +206,40 @@ mod tests {
         assert_eq!(rate_mbit(0, 1_250_000, 1.0), Some(10.0));
         assert_eq!(rate_mbit(10, 5, 1.0), None);
         assert_eq!(rate_mbit(0, 5, 0.0), None);
+    }
+
+    // ---- audit regression tests ------------------------------------------
+
+    #[test]
+    fn a_missing_link_speed_is_permanent_only_for_devices_without_one() {
+        let s = crate::collect::tests::Scratch::new("primary", "speed");
+        s.edit_json("network_device_status.json", |doc| {
+            doc["eth0"].as_object_mut().unwrap().remove("speed");
+        });
+        let mut cfg = Config::default();
+        cfg.select.devices = vec!["eth0".into(), "pppoe-wan".into()];
+        let r = run(
+            Group::Traffic,
+            &s.source,
+            &cfg,
+            &mut CollectorState::default(),
+            0.0,
+        );
+        // An Ethernet port whose link is down will have a speed again.
+        assert!(matches!(
+            value_of(&r, "traffic.speed", "eth0", ""),
+            Some(Reading::Unavailable {
+                permanent: false,
+                ..
+            })
+        ));
+        // A PPP interface never has one.
+        assert!(matches!(
+            value_of(&r, "traffic.speed", "pppoe-wan", ""),
+            Some(Reading::Unavailable {
+                permanent: true,
+                ..
+            })
+        ));
     }
 }

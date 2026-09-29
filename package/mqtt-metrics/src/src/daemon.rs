@@ -6,7 +6,9 @@
 //! blocking call has a timeout so the loop keeps turning.
 
 use std::collections::hash_map::DefaultHasher;
+use std::fs::{File, OpenOptions, TryLockError};
 use std::hash::{Hash, Hasher};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -28,6 +30,83 @@ const LOOP_STEP: Duration = Duration::from_secs(1);
 const STATUS_EVERY: f64 = 15.0;
 const BACKOFF_MIN_S: f64 = 5.0;
 const BACKOFF_MAX_S: f64 = 120.0;
+/// A connection that lasted this long counts as healthy: the next failure
+/// starts again from the shortest delay.
+const STABLE_S: f64 = 60.0;
+
+/// Reconnect delays: 5 s, doubling up to 120 s. Without the growth a broker
+/// that accepts the connection and then drops it (a duplicate client id, a
+/// proxy in front of the broker) would make the daemon reconnect, collect and
+/// republish everything every few seconds.
+#[derive(Debug)]
+struct Backoff {
+    delay: f64,
+    connected_at: Option<f64>,
+}
+
+impl Backoff {
+    fn new() -> Backoff {
+        Backoff {
+            delay: BACKOFF_MIN_S,
+            connected_at: None,
+        }
+    }
+
+    /// A connection was established at `now`.
+    fn connected(&mut self, now: f64) {
+        self.connected_at = Some(now);
+    }
+
+    /// A connection attempt failed or the connection dropped at `now`.
+    /// Returns how long to wait before the next attempt.
+    fn failed(&mut self, now: f64) -> f64 {
+        if self
+            .connected_at
+            .take()
+            .is_some_and(|since| now - since >= STABLE_S)
+        {
+            self.delay = BACKOFF_MIN_S;
+        }
+        let wait = self.delay;
+        self.delay = (self.delay * 2.0).min(BACKOFF_MAX_S);
+        wait
+    }
+
+    /// The configuration changed or the connection was closed on purpose:
+    /// the next attempt happens at once and starts from the shortest delay.
+    fn reset(&mut self) {
+        self.delay = BACKOFF_MIN_S;
+        self.connected_at = None;
+    }
+}
+
+/// Only one daemon may run. Two instances share the client id (the broker
+/// drops one whenever the other connects, and they take turns forever) and
+/// the control socket. The lock is released when the process ends, however it
+/// ends.
+fn lock_instance(path: &Path) -> Result<File, String> {
+    if let Some(dir) = path.parent() {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => {
+            Err("another mqtt-metricsd is already running".to_string())
+        }
+        Err(TryLockError::Error(e)) => Err(format!("{}: {e}", path.display())),
+    }
+}
 
 struct Signals {
     term: Arc<AtomicBool>,
@@ -61,6 +140,8 @@ struct Session {
     client_id: String,
     /// Birth topic this session is subscribed to.
     birth: Option<String>,
+    /// The broker refused that subscription; already reported.
+    birth_denied: bool,
 }
 
 /// What a clean disconnect leaves on the session's availability topic.
@@ -82,7 +163,7 @@ struct Daemon {
     conn: Connection,
     need_full: bool,
     next_attempt: f64,
-    backoff: f64,
+    backoff: Backoff,
     last_status: f64,
 }
 
@@ -174,8 +255,12 @@ impl Daemon {
             self.log
                 .info("broker settings or device identity changed; reconnecting");
             self.disconnect(farewell);
+        }
+        if reconnect || self.session.is_none() {
+            // A changed configuration deserves an immediate attempt, not the
+            // rest of a delay that grew while the old one failed.
             self.next_attempt = self.mono();
-            self.backoff = BACKOFF_MIN_S;
+            self.backoff.reset();
         }
     }
 
@@ -231,11 +316,13 @@ impl Daemon {
                             availability_topic: id.availability_topic.clone(),
                             client_id: id.client_id.clone(),
                             birth,
+                            birth_denied: false,
                         });
                         self.conn.last_connect = Some(self.now());
                         self.conn.last_error = None;
                         self.conn.next_attempt = None;
-                        self.backoff = BACKOFF_MIN_S;
+                        self.conn.birth_denied = false;
+                        self.backoff.connected(self.mono());
                         self.need_full = true;
                         self.set_state("connected");
                     }
@@ -275,9 +362,7 @@ impl Daemon {
         }
         self.conn.last_error = Some(msg);
         self.conn.reconnects += 1;
-        self.next_attempt = self.mono() + self.backoff;
-        self.conn.next_attempt = Some(self.now() + self.backoff as u64);
-        self.backoff = (self.backoff * 2.0).min(BACKOFF_MAX_S);
+        self.schedule_retry();
         self.set_state("disconnected");
     }
 
@@ -285,9 +370,32 @@ impl Daemon {
         self.log.warn(&format!("connection lost: {e}"));
         self.session = None;
         self.conn.last_error = Some(e.to_string());
-        self.next_attempt = self.mono() + BACKOFF_MIN_S;
-        self.conn.next_attempt = Some(self.now() + BACKOFF_MIN_S as u64);
+        self.schedule_retry();
         self.set_state("disconnected");
+    }
+
+    fn schedule_retry(&mut self) {
+        let mono = self.mono();
+        let wait = self.backoff.failed(mono);
+        self.next_attempt = mono + wait;
+        self.conn.next_attempt = Some(self.now() + wait as u64);
+    }
+
+    /// Report a refused birth subscription once per session. The connection
+    /// stays up: metrics are still published, only the resend after a Home
+    /// Assistant restart does not happen.
+    fn check_subscription(&mut self) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        if session.client.subscription_denied && !session.birth_denied {
+            session.birth_denied = true;
+            self.conn.birth_denied = true;
+            let topic = session.birth.clone().unwrap_or_default();
+            self.log.warn(&format!(
+                "the broker denied the subscription to {topic}; discovery is not resent when Home Assistant restarts (allow the topic in the broker ACL or turn the birth subscription off)"
+            ));
+        }
     }
 
     /// Leave `offline` (or clear the topic) and disconnect cleanly. A clean
@@ -494,6 +602,13 @@ fn wanted_birth(cfg: &Config) -> Option<String> {
 
 pub fn run(level: Option<Level>) -> i32 {
     let mut log = Log::new(level.unwrap_or(Level::Info));
+    let _instance = match lock_instance(&Path::new(RUN_DIR).join("daemon.lock")) {
+        Ok(lock) => lock,
+        Err(e) => {
+            log.error(&e);
+            return 1;
+        }
+    };
     let signals = match Signals::register() {
         Ok(s) => s,
         Err(e) => {
@@ -521,7 +636,7 @@ pub fn run(level: Option<Level>) -> i32 {
         },
         need_full: true,
         next_attempt: 0.0,
-        backoff: BACKOFF_MIN_S,
+        backoff: Backoff::new(),
         last_status: 0.0,
     };
     d.conn.since = d.now();
@@ -599,7 +714,10 @@ pub fn run(level: Option<Level>) -> i32 {
                 .and_then(|m| s.client.maintain().map(|()| m))
         });
         match polled {
-            Some(Ok(messages)) => d.handle_incoming(messages),
+            Some(Ok(messages)) => {
+                d.handle_incoming(messages);
+                d.check_subscription();
+            }
             Some(Err(e)) => {
                 d.lost(&e);
                 d.need_full = true;
@@ -613,9 +731,35 @@ pub fn run(level: Option<Level>) -> i32 {
     }
 }
 
-/// `--purge`: connect once and clear every retained topic this router owns.
+/// `--purge`: clear every retained topic this router owns.
+///
+/// A running daemon owns those topics and has to republish afterwards, so it
+/// does the work. Without a daemon, connect once and clear them directly.
 pub fn purge_once() -> i32 {
     let log = Log::new(Level::Info);
+    match control::send(
+        &rpcd::control_path(),
+        Command::Purge,
+        Duration::from_secs(60),
+    ) {
+        Ok((true, message)) => {
+            log.info(&message);
+            return 0;
+        }
+        Ok((false, message)) => {
+            log.error(&message);
+            return 1;
+        }
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) => {}
+        Err(e) => {
+            log.error(&format!("the running daemon did not answer: {e}"));
+            return 1;
+        }
+    }
     let source = SystemSource;
     let (cfg, errors) = rpcd::load_config(&source);
     if !errors.is_empty() || !cfg.configured() {
@@ -663,7 +807,6 @@ pub fn purge_once() -> i32 {
         let _ = state.save(Path::new(STATE_PATH));
     }
     log.info(&format!("cleared {} retained topics", pubs.len()));
-    let _ = std::fs::create_dir_all(RUN_DIR);
     0
 }
 
@@ -720,5 +863,50 @@ mod tests {
             &none,
             &msg("homeassistant/status", b"online", false)
         ));
+    }
+
+    #[test]
+    fn backoff_grows_and_resets_after_a_stable_session() {
+        let mut b = Backoff::new();
+        let waits: Vec<f64> = (0..8).map(|i| b.failed(f64::from(i))).collect();
+        assert_eq!(
+            waits,
+            vec![5.0, 10.0, 20.0, 40.0, 80.0, 120.0, 120.0, 120.0]
+        );
+
+        // A connection that dropped again within a minute keeps the delay.
+        b.connected(100.0);
+        assert_eq!(b.failed(110.0), 120.0);
+
+        // One that lasted a minute or more starts over.
+        b.connected(200.0);
+        assert_eq!(b.failed(260.0), 5.0);
+        assert_eq!(b.failed(265.0), 10.0);
+
+        // A configuration change tries again from the shortest delay.
+        b.reset();
+        assert_eq!(b.failed(300.0), 5.0);
+    }
+
+    #[test]
+    fn a_second_instance_is_refused() {
+        let dir = std::env::temp_dir().join(format!("mqtt-metrics-lock-{}", std::process::id()));
+        let path = dir.join("daemon.lock");
+        let first = lock_instance(&path).unwrap();
+        let err = lock_instance(&path).unwrap_err();
+        assert!(err.contains("already running"), "{err}");
+        drop(first);
+        // A helper process forked by another test thread holds a copy of the
+        // descriptor until it calls exec, so the lock can take a moment to
+        // become free.
+        let freed = (0..300).any(|_| {
+            let ok = lock_instance(&path).is_ok();
+            if !ok {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            ok
+        });
+        assert!(freed, "the lock is free once the first instance is gone");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
