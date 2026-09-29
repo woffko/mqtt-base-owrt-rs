@@ -121,8 +121,12 @@ impl Source for SystemSource {
                 out.code
             )));
         }
-        String::from_utf8(out.stdout)
-            .map_err(|_| SourceError::Failed(format!("{program}: output is not UTF-8")))
+        if out.truncated {
+            return Err(SourceError::Failed(format!("{program}: output too large")));
+        }
+        // A stray byte in a hand-edited configuration must not make the whole
+        // source unreadable.
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
     fn now(&self) -> u64 {
@@ -235,5 +239,28 @@ impl Source for FixtureSource {
 
     fn now(&self) -> u64 {
         self.now
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stray_byte_does_not_make_a_command_unreadable() {
+        // `uci show network` with a Latin-1 peer description, for example.
+        let text = SystemSource
+            .command("sh", &["-c", "printf 'name=caf\\351\\n'"])
+            .unwrap();
+        assert_eq!(text, "name=caf\u{fffd}\n");
+    }
+
+    #[test]
+    fn output_that_was_cut_short_is_an_error() {
+        // 5 MB is over the limit for a helper's output.
+        let err = SystemSource
+            .command("sh", &["-c", "head -c 5000000 /dev/zero"])
+            .unwrap_err();
+        assert!(matches!(err, SourceError::Failed(_)), "{err:?}");
     }
 }

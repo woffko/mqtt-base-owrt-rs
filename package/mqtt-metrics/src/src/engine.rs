@@ -574,7 +574,9 @@ impl Engine {
             }
         }
 
-        let mut want = BTreeSet::new();
+        // The availability topic is owned as well: when the base topic or node
+        // changes while the service is not connected, the old one is cleared.
+        let mut want = BTreeSet::from([self.id.availability_topic.clone()]);
         for e in self.entries.values() {
             if e.announce(&self.cfg) {
                 want.insert(e.config_topic.clone());
@@ -647,8 +649,18 @@ impl Engine {
             t.last_payload = Some(payload);
             t.last_publish = Some(mono);
             t.published_at = Some(now);
-            t.held = Held::On(publication.topic.clone());
             t.next_read = Some(mono + f64::from(interval));
+            if publication.retain {
+                t.held = Held::On(publication.topic.clone());
+            } else {
+                // Not retained any more (broker.retain was switched off): a
+                // retained value left before would show to every new
+                // subscriber for good.
+                if holds_state(Some(&*t), &self.topics.topics, &publication.topic) {
+                    out.push(clear_message(&publication.topic));
+                }
+                t.held = Held::Nothing;
+            }
             out.push(publication);
         }
         for (key, topic) in clears {
@@ -768,11 +780,23 @@ impl Engine {
                                 track.last_payload = Some(payload.clone());
                                 track.last_publish = Some(mono);
                                 track.published_at = Some(now);
-                                track.held = Held::On(e.state_topic.clone());
+                                let retain = self.cfg.broker.retain;
+                                if retain {
+                                    track.held = Held::On(e.state_topic.clone());
+                                } else {
+                                    if holds_state(
+                                        Some(&*track),
+                                        &self.topics.topics,
+                                        &e.state_topic,
+                                    ) {
+                                        out.push(clear_message(&e.state_topic));
+                                    }
+                                    track.held = Held::Nothing;
+                                }
                                 out.push(Publication {
                                     topic: e.state_topic.clone(),
                                     payload,
-                                    retain: self.cfg.broker.retain,
+                                    retain,
                                     qos: self.cfg.broker.qos,
                                 });
                                 if self.topics.topics.insert(e.state_topic.clone()) {
@@ -813,8 +837,9 @@ impl Engine {
     /// Clear every retained topic this router owns, including availability.
     /// Call `settle` once the clears are delivered.
     pub fn purge(&mut self) -> Vec<Publication> {
-        let mut out: Vec<Publication> = self.topics.topics.iter().map(|t| self.clear(t)).collect();
-        out.push(self.clear(&self.id.availability_topic));
+        let mut topics = self.topics.topics.clone();
+        topics.insert(self.id.availability_topic.clone());
+        let out: Vec<Publication> = topics.iter().map(|t| self.clear(t)).collect();
         self.unsettled = Some(BTreeSet::new());
         for t in self.tracks.values_mut() {
             t.announced = None;
@@ -1086,13 +1111,71 @@ mod tests {
     }
 
     #[test]
+    fn switching_retain_off_clears_the_retained_states() {
+        let src = fixture("primary");
+        let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
+        let uptime = "openwrt/router-primary/system/uptime";
+        let first = engine.full_pass(&src, src.now(), 0.0);
+        engine.settle();
+        assert!(first.iter().any(|p| p.topic == uptime && p.retain));
+
+        let mut cfg = Config::default();
+        cfg.broker.retain = false;
+        engine.reconfigure(cfg, "router-primary");
+        let out = engine.full_pass(&src, src.now(), 10.0);
+        let clear = out
+            .iter()
+            .position(|p| p.topic == uptime && p.payload.is_empty() && p.retain)
+            .expect("the retained copy is cleared");
+        let live = out
+            .iter()
+            .position(|p| p.topic == uptime && !p.payload.is_empty())
+            .expect("the state is published");
+        assert!(clear < live, "clear first, then the live state");
+        assert!(!out[live].retain);
+
+        // Once: the next pass and the next tick leave nothing to clear.
+        let again = engine.full_pass(&src, src.now(), 20.0);
+        assert!(again
+            .iter()
+            .filter(|p| p.topic == uptime)
+            .all(|p| !p.retain));
+        let tick = engine.tick(&src, src.now(), 320.0);
+        assert!(tick.iter().filter(|p| p.topic == uptime).all(|p| !p.retain));
+    }
+
+    #[test]
+    fn the_old_availability_topic_is_cleared_when_the_base_topic_moves_while_stopped() {
+        let src = fixture("primary");
+        let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
+        engine.full_pass(&src, src.now(), 0.0);
+        engine.settle();
+        let saved = engine.topics().clone();
+
+        // The service restarts with another base topic.
+        let mut cfg = Config::default();
+        cfg.identity.base_topic = "home/r".into();
+        let mut engine = Engine::new(cfg, "router-primary", saved);
+        let out = engine.full_pass(&src, src.now(), 0.0);
+        assert_eq!(
+            payload_of(&out, "openwrt/router-primary/availability"),
+            Some("")
+        );
+        assert_eq!(payload_of(&out, "home/r/router-primary/availability"), None);
+    }
+
+    #[test]
     fn purge_clears_everything() {
         let src = fixture("primary");
         let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
         engine.full_pass(&src, src.now(), 0.0);
         let owned = engine.topics().topics.len();
         let out = engine.purge();
-        assert_eq!(out.len(), owned + 1);
+        // The availability topic is one of the owned topics.
+        assert_eq!(out.len(), owned);
+        assert!(out
+            .iter()
+            .any(|p| p.topic == "openwrt/router-primary/availability"));
         assert!(out.iter().all(|p| p.payload.is_empty() && p.retain));
         // The topics are forgotten once the clears are delivered.
         assert_eq!(engine.topics().topics.len(), owned);
