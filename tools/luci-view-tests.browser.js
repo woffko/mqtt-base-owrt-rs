@@ -2,7 +2,8 @@
 // Runs the LuCI views in headless Chromium against a small stand-in for the
 // LuCI runtime (E(), _(), view, ui, uci, dom, the require loader), without a
 // router. It exercises what the pure helper tests cannot: the DOM built by the
-// Metrics view, the state kept behind it and the UCI writes it produces.
+// Metrics view, the state kept behind it and the UCI writes it produces, and
+// how the Diagnostics actions report a failing call.
 //
 // Usage: node tools/luci-view-tests.browser.js [<resources-dir>]
 // The default is the package's htdocs/luci-static/resources. Passing another
@@ -94,7 +95,10 @@ async function scenario(input) {
 	};
 
 	const notifications = [];
-	const ui = { addNotification: (title, node, cls) => notifications.push({ title, text: node && node.textContent, cls }) };
+	const ui = {
+		addNotification: (title, node, cls) => notifications.push({ title, text: node && node.textContent, cls }),
+		createHandlerFn: (ctx, fn, ...args) => (ev) => Promise.resolve(fn.apply(ctx, args.concat([ ev ])))
+	};
 	const dom = {
 		content: (node, children) => {
 			while (node.firstChild)
@@ -133,12 +137,15 @@ async function scenario(input) {
 	const mods = { view, ui, uci, dom, mm };
 
 	// LuCI's loader: 'require x as y' directives become function parameters.
-	const names = [];
-	const re = /^'require ([\w.-]+)(?: as (\w+))?';/gm;
-	let m;
-	while ((m = re.exec(input.metrics)))
-		names.push(m[2] || m[1].split('.').pop());
-	const klass = new Function(...names, input.metrics)(...names.map((n) => mods[n]));
+	const loadView = (source) => {
+		const names = [];
+		const re = /^'require ([\w.-]+)(?: as (\w+))?';/gm;
+		let m;
+		while ((m = re.exec(source)))
+			names.push(m[2] || m[1].split('.').pop());
+		return new Function(...names, source)(...names.map((n) => mods[n]));
+	};
+	const klass = loadView(input.metrics);
 
 	window.confirm = () => true;
 
@@ -202,7 +209,14 @@ async function scenario(input) {
 	await view1.handleSave();
 	results.manualOps = ops.map((o) => o.join(' '));
 
-	results.notifications = notifications.map((n) => n.text);
+	// Diagnostics: a call that fails must be reported, not swallowed.
+	mm.callPurge = () => Promise.reject(new Error('RPC call timed out'));
+	const diagnostics = Object.create(loadView(input.diagnostics));
+	root.appendChild(diagnostics.render([ {}, {}, {}, { owned_topics: 3 } ]));
+	notifications.length = 0;
+	click('Reset retained topics');
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	results.purgeNotifications = notifications.map((n) => n.text + ' [' + n.cls + ']');
 	return results;
 }
 
@@ -216,6 +230,7 @@ async function scenario(input) {
 	const r = await page.evaluate(scenario, {
 		common: read('mqtt-metrics/common.js'),
 		metrics: read('view/mqtt-metrics/metrics.js'),
+		diagnostics: read('view/mqtt-metrics/diagnostics.js'),
 		catalog,
 		uci: {
 			publish: { type: 'publish', options: { interval: '60', change_only: '1', max_age: '3600' } },
@@ -253,6 +268,10 @@ async function scenario(input) {
 	// Manual mode stores the list.
 	assert.deepEqual(r.manualInterfaces, [ 'wan', 'wanb' ]);
 	assert.ok(r.manualOps.includes('set select interface wan,wanb,lan'), r.manualOps.join('\n'));
+
+	// A failing purge call is shown to the user.
+	assert.equal(r.purgeNotifications.length, 1, 'purge failure: ' + r.purgeNotifications.join('\n'));
+	assert.match(r.purgeNotifications[0], /Reset retained topics: .*timed out \[danger\]$/);
 
 	console.log('luci-view-tests: ok');
 })().catch((e) => {

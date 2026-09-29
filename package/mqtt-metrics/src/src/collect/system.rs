@@ -23,11 +23,7 @@ pub fn collect(ctx: &Context, state: &mut CollectorState, out: &mut GroupResult)
     out.push(
         &SYSTEM_MODEL,
         none(),
-        Reading::text(if model.is_empty() {
-            "Unknown Model".to_string()
-        } else {
-            model
-        }),
+        Reading::non_empty(model, "no /tmp/sysinfo/model"),
     );
     let board = src
         .read("/tmp/sysinfo/board_name")
@@ -36,11 +32,7 @@ pub fn collect(ctx: &Context, state: &mut CollectorState, out: &mut GroupResult)
     out.push(
         &SYSTEM_TARGET,
         none(),
-        Reading::text(if board.is_empty() {
-            "Unknown Platform".to_string()
-        } else {
-            board
-        }),
+        Reading::non_empty(board, "no /tmp/sysinfo/board_name"),
     );
     if state.arch.is_none() {
         state.arch = src
@@ -65,8 +57,12 @@ pub fn collect(ctx: &Context, state: &mut CollectorState, out: &mut GroupResult)
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
         })
-        .unwrap_or_else(|| "Unknown Version".to_string());
-    out.push(&SYSTEM_VERSION, none(), Reading::text(version));
+        .unwrap_or_default();
+    out.push(
+        &SYSTEM_VERSION,
+        none(),
+        Reading::non_empty(version, "no DISTRIB_RELEASE"),
+    );
     let uptime = src.read("/proc/uptime").ok().and_then(|s| {
         s.split(['.', ' '])
             .next()
@@ -441,6 +437,36 @@ mod tests {
             })
         ));
         assert!(r.missing.iter().any(|(d, _)| d.id == "system.temperature"));
+    }
+
+    #[test]
+    fn missing_identity_files_make_the_values_unavailable() {
+        // The legacy script published "Unknown Model" and the like; a value
+        // that cannot be read is unavailable, not a placeholder.
+        let s = crate::collect::tests::Scratch::new("primary", "no-identity");
+        for file in ["sysinfo_model", "sysinfo_board_name", "openwrt_release"] {
+            std::fs::remove_file(s.dir.join(file)).unwrap();
+        }
+        let r = run(
+            Group::System,
+            &s.source,
+            &Config::default(),
+            &mut CollectorState::default(),
+            0.0,
+        );
+        for id in ["system.model", "system.target_platform", "system.version"] {
+            assert!(
+                matches!(
+                    value_of(&r, id, "", ""),
+                    Some(Reading::Unavailable {
+                        permanent: false,
+                        failed: false,
+                        ..
+                    })
+                ),
+                "{id}"
+            );
+        }
     }
 
     #[test]

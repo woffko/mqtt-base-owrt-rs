@@ -129,12 +129,10 @@ fn main() {
             let script = args.get(1).map_or(legacy::SCRIPT, String::as_str);
             match legacy::import(std::path::Path::new(script)) {
                 Ok(b) => {
+                    // Nothing that identifies the broker or its account is
+                    // printed: the output ends up in terminals and logs.
                     out!(
-                        "imported broker {}:{} user {} (password {})",
-                        b.host,
-                        b.port
-                            .map_or_else(|| "default".to_string(), |p| p.to_string()),
-                        b.username.as_deref().unwrap_or("-"),
+                        "imported the broker settings (password {})",
                         if b.password.is_some() {
                             "set"
                         } else {

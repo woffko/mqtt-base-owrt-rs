@@ -1,6 +1,6 @@
 # Phase 5 evidence: cutover (2026-09-29)
 
-Confirmed by the owner in chat ("делаем переключение") for both routers.
+Confirmed by the owner in chat ("let's do the switch") for both routers.
 Production configuration: the legacy defaults (legacy metric set, 300 s,
 automatic WAN selection), following the owner's decision that defaults
 match the legacy script. The recommended set used during the soak was

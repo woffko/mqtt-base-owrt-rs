@@ -35,3 +35,14 @@ default build has no crypto code.
   refusal, acknowledgements, subscriptions and keepalive.
 - QoS 1 messages are not queued across reconnects. After every reconnect the
   daemon republishes discovery and the full state, so nothing is lost.
+
+## Dependencies
+
+AGENTS.md asks for a reason for every crate. The runtime crates are:
+
+- `serde_json`: the `ubus` replies, the status and state files and the rpcd
+  replies are JSON, and the standard library has no parser.
+- `signal-hook`: SIGTERM, SIGHUP and SIGINT set atomic flags that the main
+  loop polls. The standard library has no signal API, and installing a
+  handler without this crate needs `unsafe` (forbidden without an ADR).
+- `rustls` with the `ring` provider, only with the `tls` feature: ADR-0005.

@@ -88,6 +88,7 @@ on each full pass. The file changes only when that set changes.
 | Six discovery configs per WAN interface, even for values the interface can never have | Only values the interface protocol can provide are announced; the rest are removed once (see below) |
 | Link-local `fe80::` address published as the IPv6 of a PPPoE interface | Only global and ULA addresses are published |
 | Empty retained payloads for every missing value, including failed reads | A value that goes away is cleared once; a failed read keeps the last value |
+| `Unknown Model`, `Unknown Platform` and `Unknown Version` when the file is missing | The value is unavailable |
 | No availability | Last Will and `availability_topic` |
 | Discovery every 5 minutes | Discovery on connect, on changes and on HA birth |
 | About 60 `mosquitto_pub` processes per run, password on the command line | One persistent connection; the password is read from a root-only file |

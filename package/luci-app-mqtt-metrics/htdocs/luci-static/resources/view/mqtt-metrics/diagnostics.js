@@ -82,7 +82,9 @@ return view.extend({
 				if (confirmText && !window.confirm(confirmText))
 					return;
 				return call().then(function(res) {
-					ui.addNotification(null, E('p', {}, [ mm.text(title + ': ' + (res.message || res.error || '')) ]), res.ok ? 'info' : 'danger');
+					ui.addNotification(null, E('p', {}, [ mm.text(title + ': ' + (res && (res.message || res.error) || '')) ]), res && res.ok ? 'info' : 'danger');
+				}).catch(function(err) {
+					ui.addNotification(null, E('p', {}, [ mm.text(title + ': ' + err) ]), 'danger');
 				});
 			};
 		};
