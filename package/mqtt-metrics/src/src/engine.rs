@@ -519,6 +519,11 @@ impl Engine {
                 // The read failed: whatever the broker holds is still the
                 // best knowledge.
                 Reading::Unavailable { failed: true, .. } => {}
+                // The entity cannot exist; a topic left behind is cleared
+                // with the other topics that nothing wants any more.
+                Reading::Unavailable {
+                    permanent: true, ..
+                } => forgets.push(e.key.clone()),
                 // The value is absent. A value left by an earlier run or
                 // pass is stale and would keep showing as current.
                 Reading::Unavailable { .. } => {
@@ -743,6 +748,11 @@ mod tests {
         assert!(published.contains("openwrt/router-primary/system/uptime"));
         assert!(engine.topics().legacy_seeded);
         assert!(engine.take_dirty_topics().is_some());
+        // Every topic is written once per pass.
+        let mut seen = BTreeSet::new();
+        for p in &out {
+            assert!(seen.insert(&p.topic), "{} is published twice", p.topic);
+        }
         // 6 system + 4 status + 4 device + 2 ipv4 + 2 gateway4 + 2 ipv6 + 2 gateway6 configs.
         let configs = out
             .iter()
