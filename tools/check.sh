@@ -27,5 +27,13 @@ else
 	echo "skipping tools/luci-view-tests.browser.js (no Playwright)"
 fi
 sh -n package/mqtt-metrics/files/etc/init.d/mqtt-metrics
-python3 -m py_compile tools/sanitize-fixtures.py tools/parity-check.py tools/gen-topics.py
+sh -n tools/e2e-smoke.sh
+python3 -m py_compile tools/sanitize-fixtures.py tools/parity-check.py tools/gen-topics.py tools/e2e/e2e.py
+# The daemon against a fake broker and fake uci/ubus takes about a minute and
+# a half: run it with E2E=1 before a deployment.
+if [ -n "${E2E:-}" ]; then
+	sh tools/e2e-smoke.sh
+else
+	echo "skipping tools/e2e-smoke.sh (set E2E=1 to run it)"
+fi
 echo "all checks passed"

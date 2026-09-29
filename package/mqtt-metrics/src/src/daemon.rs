@@ -790,6 +790,7 @@ pub fn run(level: Option<Level>) -> i32 {
         let cfg = match &d.config {
             Ok(cfg) => cfg.clone(),
             Err(_) => {
+                let changed = d.conn.state != "config_error";
                 d.set_state("config_error");
                 if d.config_retry.due(d.mono()) {
                     log.info("trying to read the configuration again");
@@ -798,7 +799,7 @@ pub fn run(level: Option<Level>) -> i32 {
                         d.set_state("config_error");
                     }
                     d.write_status();
-                } else if d.mono() - d.last_status >= STATUS_EVERY {
+                } else if changed || d.mono() - d.last_status >= STATUS_EVERY {
                     d.write_status();
                 }
                 std::thread::sleep(LOOP_STEP);
