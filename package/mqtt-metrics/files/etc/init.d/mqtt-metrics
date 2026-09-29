@@ -40,7 +40,11 @@ start_service() {
 # on SIGHUP and reconnects only when broker settings changed.
 reload_service() {
 	if ! service_enabled; then
+		# `stop` deletes the procd service together with its reload trigger,
+		# and enabling the service later would never reload it. `start`
+		# registers the service again, without an instance while disabled.
 		stop
+		start
 	elif procd_running "$CONFIG"; then
 		procd_send_signal "$CONFIG" '*' HUP
 	else
