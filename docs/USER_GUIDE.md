@@ -84,6 +84,11 @@ interval is published at the first read after that interval has passed, so it
 is effectively rounded up to a multiple of the group's shortest interval (with
 60 s and 90 s in one group, the 90 s metric is published every 120 s).
 
+A group whose source is missing or fails at a read (`mwan3` not running yet,
+`ubus` answering with an error) is read again at its interval, so its metrics
+appear as soon as the source does. Values published earlier stay in place
+while a read fails.
+
 ### Selection
 
 - **Interfaces**: automatic selects the `wan*` and `wwan*` interfaces, like

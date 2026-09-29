@@ -103,6 +103,37 @@ pub fn interval_for(cfg: &Config, def: &MetricDef, over_interval: Option<u32>) -
         .unwrap_or(cfg.publish.interval)
 }
 
+/// Whether `key` can be the key of a metric made from an object template: the
+/// literal parts of the template appear in it, in order.
+fn key_fits(template: &str, key: &str) -> bool {
+    let mut literals = Vec::new();
+    let mut rest = template;
+    while let Some(start) = rest.find('{') {
+        let Some(len) = rest[start..].find('}') else {
+            break;
+        };
+        literals.push(sanitize_key(&rest[..start]));
+        rest = &rest[start + len + 1..];
+    }
+    literals.push(sanitize_key(rest));
+    let Some((first, others)) = literals.split_first() else {
+        return false;
+    };
+    let Some(mut left) = key.strip_prefix(first.as_str()) else {
+        return false;
+    };
+    let Some((last, middle)) = others.split_last() else {
+        return left.is_empty();
+    };
+    for literal in middle {
+        match left.find(literal.as_str()) {
+            Some(at) => left = &left[at + literal.len()..],
+            None => return false,
+        }
+    }
+    left.ends_with(last.as_str())
+}
+
 pub fn resolve(sample: Sample, cfg: &Config, id: &Identity) -> Entry {
     let def = sample.def;
     let key = metric_key(def, &sample.inst);
@@ -406,8 +437,37 @@ impl Engine {
             .min()
     }
 
+    /// Interval for a group that publishes nothing right now. It is still
+    /// worth reading when a template that is on by default has no entry (its
+    /// source is absent or failed) or when an override switches on a metric
+    /// of an instance that is not there, so that the metric comes back when
+    /// its source does.
+    fn idle_interval(&self, group: Group) -> Option<u32> {
+        catalog::ALL
+            .iter()
+            .copied()
+            .filter(|def| def.group == group)
+            .flat_map(|def| {
+                let by_default = (def.legacy && !self.entries.values().any(|e| e.def.id == def.id))
+                    .then(|| interval_for(&self.cfg, def, None));
+                let overridden = self
+                    .cfg
+                    .metrics
+                    .iter()
+                    .filter(move |(key, over)| {
+                        over.publish == Some(true) && key_fits(def.object, key)
+                    })
+                    .map(move |(_, over)| interval_for(&self.cfg, def, over.interval));
+                by_default.into_iter().chain(overridden)
+            })
+            .min()
+    }
+
     fn reschedule(&mut self, group: Group, mono: f64) {
-        match self.group_interval(group) {
+        match self
+            .group_interval(group)
+            .or_else(|| self.idle_interval(group))
+        {
             Some(i) => {
                 self.next_due.insert(group, mono + f64::from(i));
             }
@@ -446,20 +506,26 @@ impl Engine {
             seed,
         );
         self.missing = round.missing;
-        let previous: Vec<String> = self.entries.keys().cloned().collect();
+        let previous = std::mem::take(&mut self.entries);
         self.entries = round
             .entries
             .into_iter()
             .map(|e| (e.key.clone(), e))
             .collect();
-        for key in previous {
-            if !self.entries.contains_key(&key) {
-                // Its topics are cleared below when nothing wants them.
-                if let Some(track) = self.tracks.get_mut(&key) {
-                    track.forget_state();
+        // A group whose source failed says nothing about its instances. They
+        // stay, as failed reads, so that their topics are not cleared as stale
+        // and nothing old is published as new.
+        for (key, mut entry) in previous {
+            if !self.entries.contains_key(&key) && round.failed.contains(&entry.def.group) {
+                if !entry.permanent() {
+                    entry.reading = Reading::failed("the source could not be read");
                 }
+                self.entries.insert(key, entry);
             }
         }
+        // What is gone loses its track. Its topics are cleared below when
+        // nothing wants them, and if it comes back it is announced again.
+        self.tracks.retain(|key, _| self.entries.contains_key(key));
 
         if seed {
             if let Some(wan) = &round.legacy_wan {
@@ -607,7 +673,7 @@ impl Engine {
             if holds_state(self.tracks.get(&key), &self.topics.topics, &topic) {
                 out.push(clear_message(&topic));
             }
-            self.tracks.entry(key).or_default().forget_state();
+            self.tracks.remove(&key);
         }
         self.entries.retain(|k, e| {
             !due.contains(&e.def.group)
@@ -705,6 +771,37 @@ mod tests {
     use super::*;
     use crate::collect::tests::fixture;
     use crate::config::MetricOverride;
+
+    #[test]
+    fn a_key_fits_only_the_template_it_came_from() {
+        assert!(key_fits("mwan3_{n}_score", "mwan3_wan_score"));
+        assert!(!key_fits("mwan3_{n}_score", "mwan3_wan_latency"));
+        assert!(!key_fits("mwan3_{n}_score", "wg_wan_score"));
+        assert!(key_fits("system_uptime", "system_uptime"));
+        assert!(!key_fits("system_uptime", "system_uptime_2"));
+        assert!(key_fits("{p}_{n}_status", "wan_wan_6_status"));
+    }
+
+    #[test]
+    fn every_metric_key_fits_its_template() {
+        let instances = [
+            Instance::none(),
+            Instance::named("eth0.1"),
+            Instance::iface(Family::Wan, "wan_6"),
+            Instance::iface(Family::Iface, "lan").with_sub("br-lan"),
+            Instance::named("phone").with_sub("x y"),
+        ];
+        for def in catalog::ALL.iter().copied() {
+            for inst in &instances {
+                let key = metric_key(def, inst);
+                assert!(
+                    key_fits(def.object, &key),
+                    "{} does not fit {key}",
+                    def.object
+                );
+            }
+        }
+    }
 
     fn topics_of(p: &[Publication]) -> BTreeSet<String> {
         p.iter()
@@ -968,6 +1065,118 @@ mod tests {
         let out = engine.tick(&s.source, s.source.now(), 300.0);
         assert_eq!(payload_of(&out, memory), None);
         assert_eq!(payload_of(&out, kernel), None);
+    }
+
+    #[test]
+    fn a_group_that_fails_at_the_first_pass_is_read_again() {
+        // netifd is not ready yet when the daemon starts.
+        let s = Scratch::new("primary", "late-netifd");
+        let dump = std::fs::read_to_string(s.dir.join("network_interface_dump.json")).unwrap();
+        s.write("network_interface_dump.json", "not json");
+        let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
+        let status = "openwrt/router-primary/wan-wan/status";
+        let first = engine.full_pass(&s.source, s.source.now(), 0.0);
+        assert_eq!(payload_of(&first, status), None);
+
+        s.write("network_interface_dump.json", &dump);
+        let out = engine.tick(&s.source, s.source.now(), 300.0);
+        assert_eq!(payload_of(&out, status), Some("up"));
+    }
+
+    #[test]
+    fn a_group_that_is_absent_at_the_first_pass_is_read_again() {
+        // mwan3 is installed and started after the daemon.
+        let s = Scratch::new("primary", "late-mwan3");
+        let status = std::fs::read_to_string(s.dir.join("mwan3_status.json")).unwrap();
+        std::fs::remove_file(s.dir.join("mwan3_status.json")).unwrap();
+        let cfg = publishing(&["mwan3_wan_score"]);
+        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
+        let score = "openwrt/router-primary/mwan3-wan/score";
+        let first = engine.full_pass(&s.source, s.source.now(), 0.0);
+        assert_eq!(payload_of(&first, score), None);
+
+        s.write("mwan3_status.json", &status);
+        let out = engine.tick(&s.source, s.source.now(), 300.0);
+        assert!(payload_of(&out, score).is_some_and(|p| !p.is_empty()));
+    }
+
+    #[test]
+    fn a_group_comes_back_after_a_failed_round() {
+        let s = Scratch::new("primary", "failed-round");
+        let dump = std::fs::read_to_string(s.dir.join("network_interface_dump.json")).unwrap();
+        let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
+        let status = "openwrt/router-primary/wan-wan/status";
+        engine.full_pass(&s.source, s.source.now(), 0.0);
+
+        s.write("network_interface_dump.json", "not json");
+        let out = engine.tick(&s.source, s.source.now(), 300.0);
+        assert_eq!(payload_of(&out, status), None);
+
+        s.write("network_interface_dump.json", &dump);
+        let out = engine.tick(&s.source, s.source.now(), 600.0);
+        assert_eq!(payload_of(&out, status), Some("up"));
+    }
+
+    fn config_topic_of(out: &[Publication], object: &str) -> String {
+        out.iter()
+            .map(|p| p.topic.clone())
+            .find(|t| t.ends_with("/config") && t.contains(object))
+            .unwrap_or_else(|| panic!("no discovery config for {object}"))
+    }
+
+    #[test]
+    fn an_entity_removed_by_a_full_pass_is_announced_again_when_it_returns() {
+        let s = Scratch::new("primary", "returning");
+        let status = std::fs::read_to_string(s.dir.join("mwan3_status.json")).unwrap();
+        let cfg = publishing(&["mwan3_wan_score"]);
+        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
+        let first = engine.full_pass(&s.source, s.source.now(), 0.0);
+        let config = config_topic_of(&first, "mwan3_wan_score");
+
+        // mwan3 stops tracking `wan` and the connection is re-established:
+        // the full pass removes the entity from Home Assistant.
+        s.edit_json("mwan3_status.json", |doc| {
+            doc["interfaces"].as_object_mut().unwrap().remove("wan");
+        });
+        let out = engine.full_pass(&s.source, s.source.now(), 100.0);
+        assert_eq!(payload_of(&out, &config), Some(""));
+
+        s.write("mwan3_status.json", &status);
+        let out = engine.tick(&s.source, s.source.now(), 400.0);
+        assert!(
+            payload_of(&out, &config).is_some_and(|p| !p.is_empty()),
+            "the entity is announced again"
+        );
+    }
+
+    #[test]
+    fn a_full_pass_keeps_the_entities_of_a_group_whose_source_failed() {
+        let s = Scratch::new("primary", "failed-full-pass");
+        let status = std::fs::read_to_string(s.dir.join("mwan3_status.json")).unwrap();
+        let cfg = publishing(&["mwan3_wan_score"]);
+        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
+        let first = engine.full_pass(&s.source, s.source.now(), 0.0);
+        let config = config_topic_of(&first, "mwan3_wan_score");
+        let score = "openwrt/router-primary/mwan3-wan/score";
+
+        // The connection is re-established while ubus answers with garbage.
+        s.write("mwan3_status.json", "not json");
+        let out = engine.full_pass(&s.source, s.source.now(), 100.0);
+        assert!(
+            out.iter()
+                .all(|p| !p.topic.contains("mwan3") || !p.payload.is_empty()),
+            "nothing about mwan3 is cleared"
+        );
+        assert!(payload_of(&out, &config).is_some_and(|p| !p.is_empty()));
+        assert_eq!(
+            payload_of(&out, score),
+            None,
+            "no stale value is republished"
+        );
+
+        s.write("mwan3_status.json", &status);
+        let out = engine.tick(&s.source, s.source.now(), 400.0);
+        assert!(payload_of(&out, score).is_some_and(|p| !p.is_empty()));
     }
 
     #[test]
