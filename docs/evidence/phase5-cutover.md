@@ -45,3 +45,15 @@ after the upgrade both configs were removed.
 - `/usr/bin/publish_metrics.sh` and `/etc/.publish_metrics_installed` are
   still on both routers (optional removal, docs/MIGRATION.md step 4).
 - Home Assistant itself is checked by the owner.
+
+## Follow-up (2026-09-29)
+
+- The owner checked Home Assistant after the cutover: OK.
+- On the owner's instruction the backups in `/root/mqtt-metrics-migration`
+  were deleted on both routers (their `rc.local` copies contained plain-text
+  passwords). `tools/cutover.sh rollback` needs a backup and no longer works
+  on these routers; a rollback would mean restoring the legacy script from
+  `/usr/bin/publish_metrics.sh`, which is still installed, and re-adding the
+  cron line by hand.
+- The soak monitor files in `/tmp/mqtt-metrics-soak` were removed; the
+  samples are kept locally under `logs/`.
