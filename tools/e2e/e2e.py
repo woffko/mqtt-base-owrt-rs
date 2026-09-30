@@ -208,7 +208,6 @@ class Daemon:
             "mqtt-metrics.broker.port='%d'" % self.port,
             "mqtt-metrics.broker.keepalive='30'",
             "mqtt-metrics.identity=identity",
-            "mqtt-metrics.identity.cleanup_legacy='0'",
             "mqtt-metrics.publish=publish",
             "mqtt-metrics.publish.interval='%s'" % os.environ.get("E2E_INTERVAL", "300"),
         ]

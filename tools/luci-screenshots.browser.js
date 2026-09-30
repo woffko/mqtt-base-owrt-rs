@@ -22,7 +22,7 @@ const password = fs.readFileSync(0, 'utf8').replace(/[\r\n]+$/, '');
 const origin = 'https://' + host;
 const base = origin + '/cgi-bin/luci/admin/services/mqtt-metrics/';
 const pages = [ 'status', 'broker', 'topics', 'metrics', 'diagnostics' ];
-const writeMethods = [ 'test_connection', 'set_password', 'import_legacy', 'republish', 'purge', 'reload' ];
+const writeMethods = [ 'test_connection', 'set_password', 'republish', 'purge', 'reload' ];
 const viewports = {
 	desktop: { width: 1440, height: 900 },
 	mobile: { width: 390, height: 844 }

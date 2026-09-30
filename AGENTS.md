@@ -13,10 +13,9 @@ This repository provides an OpenWrt 25.12 package feed with:
 
 The repository name is `mqtt-base-owrt-rs` (private on GitHub for now).
 
-It replaces the legacy `/usr/bin/publish_metrics.sh` cron script that is
-installed from `/etc/rc.local` on the test routers. The authoritative work
-plan is `docs/plan/PLAN.md`; record deviations from it as ADRs under
-`docs/decisions/`.
+The project was built from the work plan `docs/plan/PLAN.md`, which is kept
+as history together with `docs/evidence/`; record new decisions and
+deviations as ADRs under `docs/decisions/`.
 
 ## Language
 
@@ -47,8 +46,7 @@ it):
   (TEST-NET addresses, documentation IPv6 prefix `2001:db8::/32`, fake
   hostnames).
 - Package scripts must not edit `/etc/rc.local`, crontabs, or other packages'
-  configuration. Migration from the legacy script is a documented, reversible
-  manual step.
+  configuration.
 - A missing data source (no `mwan3`, no `keepalived`, no thermal sensor, no
   Wi-Fi) must make the metric unavailable, never publish a fake value. A value
   that goes away is cleared once (empty retained message); a failed read keeps
@@ -57,9 +55,10 @@ it):
   no code path from an incoming MQTT message to an action on the router. The
   only subscription is the HA birth topic, which only triggers a discovery
   resend.
-- Defaults after install reproduce the legacy script: same metrics, interface
-  selection, topics, `unique_id`s, names and 300 s interval. Everything else
-  is configurable in LuCI and new metrics are opt-in.
+- The default set keeps its metrics, interface selection, topics,
+  `unique_id`s, names and 300 s interval: Home Assistant keeps the history of
+  an entity only while they stay the same (`tests/topic_compatibility.rs`).
+  Everything else is configurable in LuCI and new metrics are opt-in.
 
 ## Rust rules
 
@@ -87,14 +86,15 @@ it):
 - The owner supplies the router password in chat. Never write it to files,
   memory, Git, logs, or delegated prompts; use `sshpass -e` with the
   `SSHPASS` environment variable.
-- Broker credentials are copied on the router from
-  `/usr/bin/publish_metrics.sh` with `mqtt-metricsd --import-legacy`: host,
-  port and user go to `/etc/config/mqtt-metrics`, the password to
-  `/etc/mqtt-metrics/secret` (ADR-0004). Nothing is printed.
+- The broker settings are in `/etc/config/mqtt-metrics` on the routers, the
+  password in `/etc/mqtt-metrics/secret` (ADR-0004). Read the password only on
+  the router, never print it, and never put it on a command line: for a
+  check with `mosquitto_sub` pass it through a temporary 0600 options file.
 - Read-only inspection is the default. Installing and removing this project's
   packages on both routers is authorized as part of the Goal. Changes to
-  `/etc/rc.local`, `/etc/crontabs/root`, and the cutover from the legacy
-  script require the owner's explicit confirmation in chat, per router.
+  `/etc/rc.local`, `/etc/crontabs/root`, and deleting files that do not
+  belong to this project's packages require the owner's explicit
+  confirmation in chat, per router.
 - The owner checks Home Assistant itself; the agent verifies only the MQTT
   side (retained topics, availability).
 - Never restart the firewall, force a WAN failover, signal `ubusd`, or reboot.

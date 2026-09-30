@@ -22,7 +22,7 @@ def main():
         out.append("| --- | --- | --- | --- | --- | --- | --- |")
         for r in items:
             cls = ", ".join(x for x in [r["unit"], r["device_class"], r["state_class"]] if x) or "-"
-            flags = "on (legacy)" if r["legacy"] else ("recommended" if r["recommended"] else "off")
+            flags = "on" if r["default_on"] else ("recommended" if r["recommended"] else "off")
             if r["diagnostic"]:
                 flags += ", diagnostic"
             if r["default_interval"]:

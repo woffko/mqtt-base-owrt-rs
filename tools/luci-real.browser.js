@@ -239,7 +239,6 @@ const scenarios = {
 	async broker() {
 		const h = await start({ view: 'mqtt-metrics/broker', handlers: {
 			'mqtt-metrics.catalog': () => [ 0, catalog ],
-			'mqtt-metrics.legacy': () => [ 0, { importable: false } ],
 			'mqtt-metrics.test_connection': () => [ 6 ]
 		} });
 		try {
@@ -272,8 +271,7 @@ const scenarios = {
 	// The catalog is the only source of TLS support and of the password state.
 	async broker_without_the_service() {
 		const h = await start({ view: 'mqtt-metrics/broker', handlers: {
-			'mqtt-metrics.catalog': () => [ 7 ],
-			'mqtt-metrics.legacy': () => [ 7 ]
+			'mqtt-metrics.catalog': () => [ 7 ]
 		} });
 		try {
 			const { page } = h;
@@ -296,7 +294,6 @@ const scenarios = {
 	// Failed calls on the Diagnostics page.
 	async diagnostics() {
 		const h = await start({ view: 'mqtt-metrics/diagnostics', handlers: {
-			'mqtt-metrics.legacy': () => [ 6 ],
 			'mqtt-metrics.catalog': () => [ 0, catalog ],
 			'mqtt-metrics.log': () => [ 0, { lines: [] } ],
 			'mqtt-metrics.status': () => [ 0, { owned_topics: 3 } ],
@@ -305,8 +302,8 @@ const scenarios = {
 		try {
 			const { page } = h;
 			const body = await page.$eval('.cbi-map', (e) => e.textContent.replace(/\s+/g, ' '));
-			assert.match(body, /did not answer, so nothing is known about the legacy installation/);
-			assert.doesNotMatch(body, /No legacy installation found/);
+			assert.match(body, /Actions/);
+			assert.doesNotMatch(body, /publish_metrics|[Ll]egacy/, 'no trace of the old script');
 			await page.click('button:has-text("Reload configuration")');
 			await page.waitForTimeout(500);
 			const text = (await alerts(page)).join(' | ');

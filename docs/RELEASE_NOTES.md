@@ -3,20 +3,16 @@
 ## 0.1.0 (unreleased)
 
 First version of `mqtt-metrics` and `luci-app-mqtt-metrics` for OpenWrt 25.12.
-It replaces the `publish_metrics.sh` cron script.
 
-### Compatibility with publish_metrics.sh
+### Defaults
 
-- With the default configuration the same state topics, Home Assistant
-  `unique_id`s, entity names, icons and classes are published every 300
-  seconds, so existing entities keep their history.
-- Fixed legacy defects: no empty retained payloads, no link-local IPv6
-  address for PPPoE interfaces, no entities that can never have a value (they
-  are removed once), discovery only on connect, change and Home Assistant
-  birth, availability through a Last Will.
-- `mqtt-metricsd --import-legacy` (or **Import broker settings** in LuCI)
-  copies the broker settings from the legacy script, the password on the
-  router only.
+- Every 300 seconds the system identity and uptime and the state, device,
+  addresses and gateways of the `wan*`/`wwan*` interfaces are published. Their
+  topics, Home Assistant `unique_id`s, names, icons and classes stay the same
+  between versions, so Home Assistant keeps the history.
+- No link-local IPv6 address for PPPoE interfaces, no entities that can never
+  have a value, discovery only on connect, change and Home Assistant birth,
+  availability through a Last Will.
 
 ### Daemon
 
@@ -28,7 +24,7 @@ It replaces the `publish_metrics.sh` cron script.
   topic.
 - Metric groups: system, network interfaces, traffic, mwan3, HA cluster
   (ha-cluster/keepalived), DHCP, WireGuard, Wi-Fi, services, packages; 69
-  templates in total, the legacy twelve on by default.
+  templates in total, twelve on by default plus the selected services.
 - Intervals per metric, per group and global; optional change-only
   publishing with a maximum age.
 - Retained topics owned by the router are tracked, so hidden metrics,
@@ -43,15 +39,14 @@ It replaces the `publish_metrics.sh` cron script.
   **Services → MQTT Metrics**; desktop and mobile layouts.
 - Per-metric Publish / Show in Home Assistant switches, name, object id,
   topic suffix, icon and interval overrides, "Recommended set" and "Reset to
-  legacy defaults".
-- Connection test with unsaved values, discovery preview, service log,
-  legacy-script detection with migration steps.
+  defaults".
+- Connection test with unsaved values, discovery preview, service log.
 
 ### Measured on the x86_64 test routers
 
 - Package `mqtt-metrics` 0.97 MB (binary 1.9 MB with TLS), LuCI package
   15 KB.
-- Legacy set: RSS 2.4 MB. Every metric (164 on the primary) at a 30 s
+- Default set: RSS 2.4 MB. Every metric (164 on the primary) at a 30 s
   interval: RSS 2.9 MB and 0.16 % of one CPU core including the `ubus` and
   `uci` helper processes.
 
@@ -72,8 +67,6 @@ Details and evidence: `docs/evidence/audit-2026-09-29.md`.
 - The link speed of an Ethernet port no longer removes and re-creates the
   entity when the link flaps.
 - Boot time and other ages are not published before NTP has set the clock.
-- The legacy topics are adopted only after the cron line for
-  `publish_metrics.sh` is gone.
 - A broker that denies the birth subscription no longer drops the connection;
   the Status page shows a warning. New option `birth` switches the
   subscription off.
@@ -83,10 +76,8 @@ Details and evidence: `docs/evidence/audit-2026-09-29.md`.
   service.
 - Test connection sends the stored password only to the saved broker and
   honours the TLS switches.
-- Importing the legacy broker settings understands comments and escapes and
-  refuses what only the shell can evaluate.
-- LuCI: Reset to legacy defaults redraws every section; CPU and rate rows
-  show the last value.
+- LuCI: Reset to defaults redraws every section; CPU and rate rows show the
+  last value.
 
 Found by the independent review of the same commit:
 
@@ -106,8 +97,7 @@ Found by the independent review of the same commit:
   Broker and Metrics forms reject the values the daemon refuses (port 0,
   decimal keepalive, names over 128 bytes).
 - `set_password` without a password argument is an error instead of
-  deleting the stored password; the legacy import reads `export` lines and
-  refuses assignments it cannot read instead of deleting the password.
+  deleting the stored password.
 - No more `Unknown Model`, `Unknown Platform` and `Unknown Version`
   placeholders; mwan3 zeros (no quality checks, no state), an empty package
   index and a stopped service are reported as what they are.
@@ -125,7 +115,17 @@ Found by the independent review of the same commit:
 - LuCI: the identity warning survives a save; the Broker page says when it
   cannot know the password or TLS state; the password field is not filled by
   password managers; failed calls show their message.
-- Tools: the parity check needs the daemon's dry run to name the removals it
-  accepts; the browser scripts no longer print the router password in
+- Tools: the browser scripts no longer print the router password in
   errors; `tools/e2e-smoke.sh` runs the daemon against a fake broker and
   `tools/luci-real.browser.js` runs the views on the real LuCI client code.
+
+### Cleanup (mqtt-metrics r8, luci-app-mqtt-metrics r7)
+
+- The migration from the shell script that served as the model for this
+  daemon is gone (ADR-0007): the import of its broker settings, its
+  detection on the Diagnostics page and the adoption of its retained topics.
+  The option `identity.cleanup_legacy` is ignored if it is still set.
+- A service selected on the Metrics page is published without a second
+  switch.
+- The package declares `libgcc` and `ca-bundle`, which the binary and the
+  default TLS settings need.

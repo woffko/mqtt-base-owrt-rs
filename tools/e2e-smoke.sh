@@ -2,7 +2,7 @@
 # End-to-end smoke test of the daemon on this machine, without a router.
 #
 # It builds a copy of the crate whose absolute paths (state, secret, run
-# directory, legacy files, configuration file) point into a scratch directory,
+# directory, configuration file) point into a scratch directory,
 # puts fake `uci` and `ubus` commands (answering from tests/fixtures/primary)
 # in front of PATH and runs the real daemon against an in-process fake broker
 # (tools/e2e/e2e.py). It covers what the unit tests cannot: the daemon loop,
@@ -18,7 +18,7 @@ mkdir -p "$WORK"
 WORK=$(cd "$WORK" && pwd)
 
 rm -rf "$WORK/crate"
-mkdir -p "$WORK/crate" "$WORK/bin" "$WORK/fix" "$WORK/etc" "$WORK/run" "$WORK/none" "$WORK/etcconfig"
+mkdir -p "$WORK/crate" "$WORK/bin" "$WORK/fix" "$WORK/etc" "$WORK/run" "$WORK/etcconfig"
 (cd "$REPO/package/mqtt-metrics/src" && tar --exclude=target -cf - .) | tar -xf - -C "$WORK/crate"
 : > "$WORK/etcconfig/mqtt-metrics"
 
@@ -29,10 +29,6 @@ patch_path() { # file old new
 patch_path config.rs /etc/mqtt-metrics/secret "$WORK/etc/secret"
 patch_path config.rs /etc/mqtt-metrics/state.json "$WORK/etc/state.json"
 patch_path config.rs /var/run/mqtt-metrics "$WORK/run"
-patch_path legacy.rs /usr/bin/publish_metrics.sh "$WORK/none/script"
-patch_path legacy.rs /etc/.publish_metrics_installed "$WORK/none/marker"
-patch_path legacy.rs /etc/crontabs/root "$WORK/none/cron"
-patch_path legacy.rs /etc/rc.local "$WORK/none/rc"
 sed -i "s#\"/etc/config/{}\"#\"$WORK/etcconfig/{}\"#" "$WORK/crate/src/rpcd.rs"
 grep -q "$WORK/etcconfig" "$WORK/crate/src/rpcd.rs" || { echo "config path not found in rpcd.rs" >&2; exit 1; }
 

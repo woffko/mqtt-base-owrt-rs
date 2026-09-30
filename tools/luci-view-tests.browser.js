@@ -26,7 +26,7 @@ const metric = (key, group, name, extra) => Object.assign({
 	value: '1', last_published: null, available: true, reason: null, permanent: false,
 	publish: false, default_publish: false, discovery: true, ha_enabled: true,
 	diagnostic: false, default_diagnostic: false, interval: 300, interval_override: null,
-	legacy: false, recommended: false
+	recommended: false
 }, extra || {});
 
 const catalog = {
@@ -37,18 +37,18 @@ const catalog = {
 		{ id: 'interface', title: 'Network interfaces', enabled: true, interval: null, missing: [] }
 	],
 	metrics: [
-		metric('system_uptime', 'system', 'Uptime', { publish: true, default_publish: true, legacy: true, unit: 's', value: '100' }),
+		metric('system_uptime', 'system', 'Uptime', { publish: true, default_publish: true, unit: 's', value: '100' }),
 		metric('system_load_1', 'system', 'Load (1 min)', { recommended: true, value: '0.5' }),
 		metric('system_cpu_usage', 'system', 'CPU Usage', {
 			available: false, value: null, reason: 'waiting for a second sample',
 			last_published: '12.5', unit: '%', publish: true, recommended: true
 		}),
-		metric('wan_wan_status', 'interface', 'WAN wan Status', { publish: true, default_publish: true, legacy: true })
+		metric('wan_wan_status', 'interface', 'WAN wan Status', { publish: true, default_publish: true })
 	],
 	interfaces: [
-		{ name: 'wan', proto: 'pppoe', legacy_wan: true, selected: true },
-		{ name: 'wanb', proto: 'static', legacy_wan: true, selected: true },
-		{ name: 'lan', proto: 'static', legacy_wan: false, selected: false }
+		{ name: 'wan', proto: 'pppoe', auto_wan: true, selected: true },
+		{ name: 'wanb', proto: 'static', auto_wan: true, selected: true },
+		{ name: 'lan', proto: 'static', auto_wan: false, selected: false }
 	],
 	devices: [ 'eth0', 'pppoe-wan' ],
 	services: [ 'dnsmasq', 'ha-cluster' ],
@@ -186,8 +186,8 @@ async function scenario(input) {
 	results.cpuValue = text(cpuRow.children[3]);
 	results.uptimeValue = text(root.querySelector('tr[data-key="system_uptime"]').children[3]);
 
-	// Reset to legacy defaults, then look at the form and change it again.
-	click('Reset to legacy defaults');
+	// Reset to defaults, then look at the form and change it again.
+	click('Reset to defaults');
 	results.afterReset = snapshot();
 	serviceBox('ha-cluster').checked = true;
 	change(serviceBox('ha-cluster'));
@@ -251,12 +251,12 @@ async function scenario(input) {
 	assert.equal(r.uptimeValue, '100 s');
 	assert.match(r.cpuValue, /^12\.5 %\s*\(last published\)$/);
 
-	// "Reset to legacy defaults" must show what Save will write.
+	// "Reset to defaults" must show what Save will write.
 	assert.equal(r.afterReset.interval, '300', 'reset: global interval');
 	assert.equal(r.afterReset.changeOnly, false, 'reset: publish only changes');
 	assert.equal(r.afterReset.mode, 'auto', 'reset: interface selection');
 	assert.deepEqual(r.afterReset.services, [], 'reset: services');
-	assert.deepEqual(r.afterReset.interfaces, [ 'wan', 'wanb' ], 'reset: legacy WAN interfaces are shown');
+	assert.deepEqual(r.afterReset.interfaces, [ 'wan', 'wanb' ], 'reset: the automatically selected interfaces are shown');
 
 	// Edits made after the reset are the ones that get saved.
 	assert.deepEqual(r.afterEdit.services, [ 'ha-cluster' ]);

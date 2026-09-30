@@ -15,17 +15,13 @@ messages received over MQTT. The only subscription is the Home Assistant
 birth topic, which makes the daemon resend discovery after Home Assistant
 restarts.
 
-The packages replace the `publish_metrics.sh` cron script. With the default
-configuration they publish the same state topics and Home Assistant
-`unique_id`s, so existing entities keep their history. See
-[docs/MIGRATION.md](docs/MIGRATION.md).
-
 ## What is published
 
-A fresh install publishes the legacy set: hostname, model, target platform,
+A fresh install publishes the default set: hostname, model, target platform,
 architecture, firmware version and uptime, plus status, device, addresses
-and gateways of every `wan*`/`wwan*` interface. Everything else is opt-in on
-the Metrics page:
+and gateways of every `wan*`/`wwan*` interface. The ids and topics of this
+set do not change between versions, so Home Assistant keeps the history.
+Everything else is opt-in on the Metrics page:
 
 | Group | Metrics |
 | --- | --- |
@@ -91,7 +87,6 @@ are available) runs the LuCI pages on the real LuCI client code, and
 
 - [User guide](docs/USER_GUIDE.md)
 - [Topics and entities](docs/TOPICS.md)
-- [Migration from publish_metrics.sh](docs/MIGRATION.md)
 - [Release notes](docs/RELEASE_NOTES.md)
 - [Work plan](docs/plan/PLAN.md) and [design decisions](docs/decisions/)
 

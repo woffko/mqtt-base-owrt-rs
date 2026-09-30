@@ -2,12 +2,12 @@
 // LuCI round-trip test: edit settings on the Broker, Topics and Metrics pages
 // through the browser, Save & Apply, then print `uci show mqtt-metrics`
 // taken over SSH so the caller can compare. A second pass runs "Reset to
-// legacy defaults". Every response body the browser receives is written to
+// defaults". Every response body the browser receives is written to
 // <out>/responses.txt so the caller can check on the router that the broker
 // password never reaches the browser.
 //
 // Writes are limited to the mqtt-metrics UCI config and the rpcd methods
-// reload/republish; set_password, import_legacy and purge are blocked.
+// reload/republish; set_password and purge are blocked.
 //
 // It changes the router's configuration: the edit phase sets the keepalive,
 // QoS, device name and model, publish interval, a hidden metric and a
@@ -73,7 +73,7 @@ async function row(page, key) {
 			const [ , object, method, args ] = packet.params;
 			const foreignUci = object === 'uci' && args && args.config && args.config !== 'mqtt-metrics' &&
 				[ 'set', 'add', 'delete', 'commit' ].includes(method);
-			const blockedRpc = object === 'mqtt-metrics' && [ 'set_password', 'import_legacy', 'purge' ].includes(method);
+			const blockedRpc = object === 'mqtt-metrics' && [ 'set_password', 'purge' ].includes(method);
 			if (foreignUci || blockedRpc) {
 				report.blocked.push({ object, method });
 				return route.abort('blockedbyclient');
@@ -124,8 +124,8 @@ async function row(page, key) {
 		await saveApply(page, 'metrics: interval, change-only, group interval, hide, name, icon, service');
 	} else {
 		await page.goto(base + 'metrics', { waitUntil: 'networkidle' });
-		await page.locator('button:has-text("Reset to legacy defaults")').click();
-		await saveApply(page, 'metrics: reset to legacy defaults');
+		await page.locator('button:has-text("Reset to defaults")').click();
+		await saveApply(page, 'metrics: reset to defaults');
 	}
 
 	await browser.close();

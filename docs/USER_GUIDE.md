@@ -5,8 +5,8 @@ Home Assistant. Everything is configured under
 **Services → MQTT Metrics** in LuCI or in `/etc/config/mqtt-metrics`.
 
 After installation the service runs but stays idle until a broker host is
-set. The defaults then reproduce the legacy `publish_metrics.sh` script: the
-same metrics, topics, entity ids and names, published every 300 seconds.
+set. It then publishes the default set every 300 seconds: the system
+identity and uptime, and the state and addresses of the WAN interfaces.
 
 ## Status
 
@@ -31,15 +31,11 @@ The page refreshes every 5 seconds.
 | User name, Password | The password is stored in `/etc/mqtt-metrics/secret` (root only) and is never shown again. Leave the field empty to keep the stored password; tick **Remove stored password** to delete it. |
 | Client ID | Must be unique on the broker. Default `mqtt-metrics-<hostname>`. |
 | Keepalive | Seconds between keepalive packets, 5-3600 (default 60). |
-| QoS for states, Retain states | Defaults 1 and on, as in the legacy script. Discovery always uses QoS 1 and retain. |
+| QoS for states, Retain states | Defaults 1 and on. Discovery always uses QoS 1 and retain. Turning retain off clears the retained states once. |
 | Use TLS | Encrypts the connection. **CA certificate file** defaults to the system bundle `/etc/ssl/certs/ca-certificates.crt` (package `ca-bundle`). Turning off **Verify the broker certificate** accepts self-signed certificates without authenticating the broker. A client certificate and key can be set for certificate authentication. |
 
 **Connection test** uses the values on the page, including unsaved changes,
 so settings can be checked before saving.
-
-When the legacy script is installed, the **Legacy script** section shows its
-broker and **Import broker settings** copies host, port, user and password.
-The password is copied on the router and not shown.
 
 ## Topics and device
 
@@ -54,7 +50,6 @@ The password is copied on the router and not shown.
 | Device ID | `openwrt_<hostname>` | Prefix of every `unique_id`. |
 | Device name, Manufacturer, Model | `OpenWrt <hostname>`, `OpenWrt`, `Router` | Shown on the Home Assistant device page. |
 | Configuration URL | empty | Link on the Home Assistant device page. |
-| Remove legacy leftovers | on | See below. |
 
 The device ID (and an object ID changed on the Metrics page) is part of the
 `unique_id` of an entity. Changing it creates new entities in Home Assistant;
@@ -63,16 +58,6 @@ state topics: the entities are updated in place, but anything else that
 reads the old topics must follow. Home Assistant has to listen on the
 discovery prefix. The Topics page shows a warning as soon as one of these
 fields changes, and the old retained topics are removed automatically.
-
-**Remove legacy leftovers**: on the first pass with discovery on, the
-service adopts the legacy script's topics for this router and clears every
-one of them that this configuration no longer publishes: the entities that
-can never have a value (the IPv4 address of a DHCPv6 interface, the IPv6
-address of a PPPoE interface) and, when the device ID, base topic or
-discovery prefix differs from the legacy layout, all the old entities. While
-the legacy script is still scheduled in `/etc/crontabs/root` the service
-leaves its topics alone, because the script would publish them again; the
-adoption happens on the first pass after the cron line is removed.
 
 ## Metrics
 
@@ -96,13 +81,15 @@ Values published earlier stay in place while a read fails.
 
 ### Selection
 
-- **Interfaces**: automatic selects the `wan*` and `wwan*` interfaces, like
-  the legacy script; manual selects any interfaces. Interfaces matched by
-  the legacy rule (marked `*`) keep the legacy entity ids, others are named
+- **Interfaces**: automatic selects the `wan*` and `wwan*` interfaces;
+  manual selects any interfaces. The entities of interfaces matched by the
+  automatic rule (marked `*`) are named `wan_<name>_...`, others
   `iface_<name>_...`.
 - **Traffic devices**: devices for the traffic group. None selected means the
   devices of the selected interfaces.
-- **Services**: procd services that get a "running" entity.
+- **Services**: procd services that get a "running" entity. A selected
+  service is published without further settings; its entity reads ON while
+  every instance of the service runs.
 
 Metrics of newly selected instances appear after **Save & Apply**.
 
@@ -129,15 +116,12 @@ Per metric:
 
 **Recommended set** switches on a useful selection (load, CPU, memory,
 storage, conntrack, interface details, traffic of the WAN devices, mwan3,
-HA cluster, DHCP). **Reset to legacy defaults** removes every override,
+HA cluster, DHCP). **Reset to defaults** removes every override,
 group setting and selection. **Filter** and **Only published** narrow the
 list. Nothing changes on the router until **Save & Apply**.
 
 ## Diagnostics
 
-- **Legacy publish_metrics.sh**: whether the script, cron entry,
-  `/etc/rc.local` block and marker file are present, with the migration
-  steps. The page does not change those files.
 - **Actions**: reload configuration, republish discovery and states, and
   **Reset retained topics**, which clears every retained topic this router
   owns on the broker and publishes everything again.
@@ -151,7 +135,6 @@ ubus call mqtt-metrics status          # same data as the Status page
 mqtt-metricsd --check-config           # validate /etc/config/mqtt-metrics
 mqtt-metricsd --dump                   # print one full publish pass (nothing is sent)
 mqtt-metricsd --catalog                # every metric with value and settings
-mqtt-metricsd --import-legacy          # copy broker settings from publish_metrics.sh
 mqtt-metricsd --purge                  # clear every retained topic this router owns
 /etc/init.d/mqtt-metrics reload        # apply a configuration committed with uci
 ```

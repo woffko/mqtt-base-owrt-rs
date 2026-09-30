@@ -1,9 +1,9 @@
 # Topics and entities
 
-This is the reference for what `mqtt-metrics` publishes. With the default
-configuration the output is compatible with the legacy `publish_metrics.sh`
-script: the same state topics, the same Home Assistant `unique_id`s and the
-same entity names.
+This is the reference for what `mqtt-metrics` publishes. The default
+topics, Home Assistant `unique_id`s and entity names are stable between
+versions: Home Assistant keeps the history of an entity only while they stay
+the same.
 
 ## Topic layout
 
@@ -16,8 +16,8 @@ same entity names.
 | Device | name `OpenWrt <hostname>`, manufacturer `OpenWrt`, model `Router` | Topics and device |
 | Birth topic (only subscription) | `homeassistant/status` | Topics and device |
 
-`<hostname>` is read at runtime from `system.@system[0].hostname`. In ids it
-is sanitized like the legacy script did (`tr -c 'A-Za-z0-9_-' '_'`); in
+`<hostname>` is read at runtime from `system.@system[0].hostname`. In ids
+every character other than letters, digits, `_` and `-` becomes `_`; in
 topics only `+`, `#` and `/` are replaced.
 
 States and discovery configs are retained. States use the configured QoS
@@ -33,20 +33,23 @@ its own entity.
 ## Payloads
 
 - Text and numbers are published as plain strings (`123`, `0.42`, `online`).
-- Legacy interface status uses `up`/`down`; every other binary sensor uses
+- Interface status uses `up`/`down`; every other binary sensor uses
   `ON`/`OFF`.
 - A value that is not available is never published as a placeholder. What
   happens to the retained state depends on why there is no value:
   - the value is **absent** (an interface is down and has no address, a
     tracking target does not answer, an instance disappeared): a retained
     value published earlier is cleared once with an empty retained message,
-    like the legacy script did, so Home Assistant shows it as unknown instead
-    of a stale value that looks current;
+    so Home Assistant shows it as unknown instead of a stale value that looks
+    current;
   - the value **could not be read** (a `ubus` call timed out, an answer was
     garbled): the last published value is kept, because the value did not go
     away. The next successful read replaces it;
   - the value **cannot exist** on this router (see below): it is not
     announced at all.
+- A value that cannot be read is never replaced by a placeholder such as
+  `Unknown Model`.
+- Only global and ULA IPv6 addresses are published, never link-local ones.
 - Some sources answer with a number where they have no value. These are
   treated as absent values, not published:
   - `mwan3` reports 0 for the latency and loss of a target when
@@ -55,14 +58,16 @@ its own entity.
   - `apk list --upgradable` prints nothing while no package index is cached
     (the cache is empty after every boot until `apk update`), so the count of
     upgradable packages is unavailable, not 0.
-- A procd service that is stopped is no longer in procd's list; its
-  `service.running` reads OFF.
+- A procd service that is selected on the Metrics page is published as
+  `service.running`. A service that is stopped is no longer in procd's list
+  and reads OFF.
 - Timestamps (`system.boot_time`) are RFC 3339 in UTC.
 
-Discovery configs contain every field the legacy script sent, with the same
-values for legacy entities, plus:
+Discovery configs contain the name, `unique_id`, state topic, device, icon,
+payloads and classes, plus:
 
-- `availability_topic`, so an unreachable router shows as unavailable;
+- `availability_topic` (retained `online`/`offline`, with a Last Will), so an
+  unreachable router shows as unavailable;
 - `state_class` (`measurement` or `total_increasing`) where it applies, which
   enables long-term statistics;
 - `entity_category: diagnostic` for diagnostic metrics;
@@ -91,20 +96,11 @@ The daemon records every retained topic it owns in
 `/etc/mqtt-metrics/state.json` and clears the ones that are no longer wanted
 on each full pass. The file changes only when that set changes.
 
-## Differences from the legacy script
+## Values that cannot exist
 
-| Legacy behaviour | mqtt-metrics |
-| --- | --- |
-| Six discovery configs per WAN interface, even for values the interface can never have | Only values the interface protocol can provide are announced; the rest are removed once (see below) |
-| Link-local `fe80::` address published as the IPv6 of a PPPoE interface | Only global and ULA addresses are published |
-| Empty retained payloads for every missing value, including failed reads | A value that goes away is cleared once; a failed read keeps the last value |
-| `Unknown Model`, `Unknown Platform` and `Unknown Version` when the file is missing | The value is unavailable |
-| No availability | Last Will and `availability_topic` |
-| Discovery every 5 minutes | Discovery on connect, on changes and on HA birth |
-| About 60 `mosquitto_pub` processes per run, password on the command line | One persistent connection; the password is read from a root-only file |
-
-Values treated as impossible (never announced, legacy leftovers removed)
-when the interface has no such address:
+Some values can never exist on an interface. They are not announced, and a
+retained topic this router owns for them is removed. A value is treated as
+impossible when the interface has no such address and it is:
 
 - IPv4 address and gateway on `dhcpv6`, `6in4`, `6to4` and `6rd`
   interfaces. DS-Lite, MAP and 464XLAT are not in this list: they carry IPv4
@@ -123,15 +119,17 @@ the link comes up, so a missing speed there is an ordinary absent value.
 
 ## Metric templates
 
-Placeholders: `{p}`/`{P}` is `wan`/`WAN` for interfaces matched by the legacy
-rule (`wan*`, `wwan*`) and `iface`/`Interface` for other interfaces; `{n}` is
+Placeholders: `{p}`/`{P}` is `wan`/`WAN` for interfaces matched by the
+automatic selection (`wan*`, `wwan*`) and `iface`/`Interface` for other interfaces; `{n}` is
 the raw and `{i}` the sanitized instance name (interface, device, peer,
 service); `{m}`/`{j}` are the raw and sanitized sub-instance (mwan3 tracking
 target, WireGuard peer). The key of a metric, used for its UCI `metric`
 section, is the expanded default object id with `-` replaced by `_`.
 
-"Default" is what a fresh install publishes: only the legacy set. The
-"Recommended set" button on the Metrics page switches on the metrics marked
+"Default" is what a fresh install publishes: the six system values, six
+values for every automatically selected interface, and the state of every
+service selected on the Metrics page (none by default). The "Recommended
+set" button on the Metrics page switches on the metrics marked
 recommended.
 
 <!-- BEGIN GENERATED TEMPLATES -->
@@ -140,12 +138,12 @@ recommended.
 
 | Template | Object id | State topic suffix | Name | Type | Unit / class | Default |
 | --- | --- | --- | --- | --- | --- | --- |
-| `system.hostname` | `system_hostname` | `system/hostname` | Hostname | sensor | - | on (legacy) |
-| `system.model` | `system_model` | `system/model` | Model | sensor | - | on (legacy) |
-| `system.target_platform` | `system_target_platform` | `system/target_platform` | Target Platform | sensor | - | on (legacy) |
-| `system.architecture` | `system_architecture` | `system/architecture` | Architecture | sensor | - | on (legacy) |
-| `system.version` | `system_version` | `system/version` | Version | sensor | - | on (legacy) |
-| `system.uptime` | `system_uptime` | `system/uptime` | Uptime | sensor | s, duration | on (legacy) |
+| `system.hostname` | `system_hostname` | `system/hostname` | Hostname | sensor | - | on |
+| `system.model` | `system_model` | `system/model` | Model | sensor | - | on |
+| `system.target_platform` | `system_target_platform` | `system/target_platform` | Target Platform | sensor | - | on |
+| `system.architecture` | `system_architecture` | `system/architecture` | Architecture | sensor | - | on |
+| `system.version` | `system_version` | `system/version` | Version | sensor | - | on |
+| `system.uptime` | `system_uptime` | `system/uptime` | Uptime | sensor | s, duration | on |
 | `system.revision` | `system_revision` | `system/revision` | Firmware Revision | sensor | - | recommended, diagnostic |
 | `system.kernel` | `system_kernel` | `system/kernel` | Kernel Version | sensor | - | recommended, diagnostic |
 | `system.boot_time` | `system_boot_time` | `system/boot_time` | Boot Time | sensor | timestamp | off, diagnostic |
@@ -173,12 +171,12 @@ recommended.
 
 | Template | Object id | State topic suffix | Name | Type | Unit / class | Default |
 | --- | --- | --- | --- | --- | --- | --- |
-| `iface.status` | `{p}_{i}_status` | `{p}-{n}/status` | {P} {n} Status | binary_sensor | connectivity | on (legacy) |
-| `iface.device` | `{p}_{i}_device` | `{p}-{n}/device` | {P} {n} Device | sensor | - | on (legacy) |
-| `iface.ipv4` | `{p}_{i}_ipv4` | `{p}-{n}/ipv4` | {P} {n} IPv4 | sensor | - | on (legacy) |
-| `iface.ipv6` | `{p}_{i}_ipv6` | `{p}-{n}/ipv6` | {P} {n} IPv6 | sensor | - | on (legacy) |
-| `iface.gateway4` | `{p}_{i}_gateway4` | `{p}-{n}/gateway4` | {P} {n} Gateway4 | sensor | - | on (legacy) |
-| `iface.gateway6` | `{p}_{i}_gateway6` | `{p}-{n}/gateway6` | {P} {n} Gateway6 | sensor | - | on (legacy) |
+| `iface.status` | `{p}_{i}_status` | `{p}-{n}/status` | {P} {n} Status | binary_sensor | connectivity | on |
+| `iface.device` | `{p}_{i}_device` | `{p}-{n}/device` | {P} {n} Device | sensor | - | on |
+| `iface.ipv4` | `{p}_{i}_ipv4` | `{p}-{n}/ipv4` | {P} {n} IPv4 | sensor | - | on |
+| `iface.ipv6` | `{p}_{i}_ipv6` | `{p}-{n}/ipv6` | {P} {n} IPv6 | sensor | - | on |
+| `iface.gateway4` | `{p}_{i}_gateway4` | `{p}-{n}/gateway4` | {P} {n} Gateway4 | sensor | - | on |
+| `iface.gateway6` | `{p}_{i}_gateway6` | `{p}-{n}/gateway6` | {P} {n} Gateway6 | sensor | - | on |
 | `iface.proto` | `{p}_{i}_proto` | `{p}-{n}/proto` | {P} {n} Protocol | sensor | - | recommended, diagnostic |
 | `iface.uptime` | `{p}_{i}_uptime` | `{p}-{n}/uptime` | {P} {n} Uptime | sensor | s, duration | recommended |
 | `iface.dns` | `{p}_{i}_dns` | `{p}-{n}/dns` | {P} {n} DNS Servers | sensor | - | recommended, diagnostic |
@@ -253,7 +251,7 @@ recommended.
 
 | Template | Object id | State topic suffix | Name | Type | Unit / class | Default |
 | --- | --- | --- | --- | --- | --- | --- |
-| `service.running` | `service_{i}_running` | `service-{n}/running` | Service {n} | binary_sensor | running | off |
+| `service.running` | `service_{i}_running` | `service-{n}/running` | Service {n} | binary_sensor | running | on |
 
 <!-- END GENERATED TEMPLATES -->
 
