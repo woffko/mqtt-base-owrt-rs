@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! System metrics: the six legacy values plus load, CPU, memory, storage,
+//! System metrics: the six default values plus load, CPU, memory, storage,
 //! conntrack and temperatures.
 
 use serde_json::Value as Json;
@@ -14,7 +14,7 @@ pub fn collect(ctx: &Context, state: &mut CollectorState, out: &mut GroupResult)
     let src = ctx.source;
     let none = Instance::none;
 
-    // Legacy values with the legacy fallbacks.
+    // The six default values.
     out.push(&SYSTEM_HOSTNAME, none(), Reading::text(hostname(src)));
     let model = src
         .read("/tmp/sysinfo/model")
@@ -404,7 +404,7 @@ mod tests {
     use crate::config::Config;
 
     #[test]
-    fn legacy_values_from_fixture() {
+    fn default_values_from_fixture() {
         let src = fixture("primary");
         let mut state = CollectorState::default();
         let r = run(Group::System, &src, &Config::default(), &mut state, 0.0);
@@ -441,8 +441,8 @@ mod tests {
 
     #[test]
     fn missing_identity_files_make_the_values_unavailable() {
-        // The legacy script published "Unknown Model" and the like; a value
-        // that cannot be read is unavailable, not a placeholder.
+        // A value that cannot be read is unavailable, not a placeholder such
+        // as "Unknown Model".
         let s = crate::collect::tests::Scratch::new("primary", "no-identity");
         for file in ["sysinfo_model", "sysinfo_board_name", "openwrt_release"] {
             std::fs::remove_file(s.dir.join(file)).unwrap();

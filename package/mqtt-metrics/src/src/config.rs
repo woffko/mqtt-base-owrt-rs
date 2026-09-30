@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! UCI configuration (`/etc/config/mqtt-metrics`).
 //!
-//! The configuration is read and validated once per (re)load. Defaults
-//! reproduce the legacy `publish_metrics.sh` script. The broker password is
-//! not part of UCI: LuCI can read every UCI option, so the password lives in a
+//! The configuration is read and validated once per (re)load. The broker
+//! password is not part of UCI: LuCI can read every UCI option, so the password lives in a
 //! root-only file ([`SECRET_PATH`]) that the browser can only overwrite.
 
 use std::collections::BTreeMap;
@@ -57,7 +56,6 @@ pub struct Identity {
     pub manufacturer: String,
     pub model: String,
     pub configuration_url: Option<String>,
-    pub cleanup_legacy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,7 +67,7 @@ pub struct Publish {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Select {
-    /// `true`: interfaces matching the legacy `wan*`/`wwan*` rule.
+    /// `true`: interfaces matching the automatic `wan*`/`wwan*` rule.
     pub interfaces_auto: bool,
     pub interfaces: Vec<String>,
     /// Devices for traffic metrics; empty means the devices of the selected
@@ -141,7 +139,6 @@ impl Default for Config {
                 manufacturer: "OpenWrt".to_string(),
                 model: "Router".to_string(),
                 configuration_url: None,
-                cleanup_legacy: true,
             },
             publish: Publish {
                 interval: 300,
@@ -391,7 +388,6 @@ pub fn from_uci_lenient(pkg: &Package) -> (Config, Vec<String>) {
         cfg.identity.model = v;
     }
     cfg.identity.configuration_url = r.string("configuration_url");
-    cfg.identity.cleanup_legacy = r.bool("cleanup_legacy", true);
     errors = r.errors;
 
     let mut r = reader(pkg, "publish", errors);

@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Compare one full publish pass on the primary router fixture with the
-//! retained topics that the legacy `publish_metrics.sh` left on the broker.
+//! retained topics captured from the production broker
+//! (`tests/fixtures/primary/retained_topics.txt`, taken before this daemon
+//! published there). Home Assistant keeps the history of an entity only while
+//! its unique_id, topics and name stay the same, so the default output has to
+//! keep reproducing them.
 //!
-//! Allowed differences (documented fixes, see docs/TOPICS.md):
-//! - entities that can never have a value are removed (empty retained
-//!   payload) instead of announced;
+//! Allowed differences (see docs/TOPICS.md):
+//! - entities that can never have a value are not announced, and removed
+//!   (empty retained payload) when this router owns them;
 //! - discovery payloads gain fields (availability, origin, state class);
 //! - `system/uptime` differs because the captures were taken moments apart.
 
@@ -21,8 +25,8 @@ fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../tests/fixtures")
 }
 
-fn legacy(host: &str) -> BTreeMap<String, String> {
-    let text = std::fs::read_to_string(fixtures().join("primary/legacy_retained.txt")).unwrap();
+fn reference(host: &str) -> BTreeMap<String, String> {
+    let text = std::fs::read_to_string(fixtures().join("primary/retained_topics.txt")).unwrap();
     text.lines()
         .filter_map(|l| l.split_once(' '))
         .filter(|(t, _)| t.contains(host))
@@ -30,7 +34,7 @@ fn legacy(host: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Legacy entities that the new daemon removes because their interface's
+/// Entities in the capture that are removed because their interface's
 /// protocol can never provide the value.
 fn documented_removal(topic: &str) -> bool {
     [
@@ -49,13 +53,17 @@ fn documented_removal(topic: &str) -> bool {
 }
 
 #[test]
-fn primary_full_pass_matches_legacy_retained_topics() {
+fn default_output_keeps_the_captured_topics() {
     let host = "router-primary";
-    let old = legacy(host);
+    let old = reference(host);
     assert!(old.len() > 40, "fixture has {} topics", old.len());
 
+    // The router owns every captured topic, as the production routers did.
+    let owned = TopicState {
+        topics: old.keys().cloned().collect(),
+    };
     let source = FixtureSource::new(&fixtures().join("primary"));
-    let mut engine = Engine::new(Config::default(), host, TopicState::default());
+    let mut engine = Engine::new(Config::default(), host, owned);
     let out = engine.full_pass(&source, source.now(), 0.0);
     let published: BTreeMap<&str, &str> = out
         .iter()
@@ -97,7 +105,7 @@ fn primary_full_pass_matches_legacy_retained_topics() {
     for topic in published.keys() {
         assert!(
             old.contains_key(*topic),
-            "{topic} is published but the legacy script never did"
+            "{topic} is published but is not in the captured set"
         );
     }
 }

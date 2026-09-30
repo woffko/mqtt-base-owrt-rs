@@ -11,7 +11,7 @@ use mqtt_metrics::engine::Engine;
 use mqtt_metrics::log::Level;
 use mqtt_metrics::source::{FixtureSource, Source, SystemSource};
 use mqtt_metrics::state::TopicState;
-use mqtt_metrics::{collect, daemon, legacy, rpcd};
+use mqtt_metrics::{collect, daemon, rpcd};
 
 /// Print a line to stdout; a closed pipe (for example `| head`) is not an
 /// error for a command-line tool.
@@ -28,7 +28,6 @@ usage: mqtt-metricsd [--log-level LEVEL]      run the publisher (procd)
        mqtt-metricsd --dump [--fixtures DIR]    print one full publish pass as JSON lines
        mqtt-metricsd --catalog [--fixtures DIR] print the metric catalog
        mqtt-metricsd --templates                print every metric template as JSON lines
-       mqtt-metricsd --import-legacy [SCRIPT]   copy broker settings from publish_metrics.sh
        mqtt-metricsd --purge                    clear every retained topic of this router
        mqtt-metricsd list | call METHOD         rpcd plugin interface
        mqtt-metricsd --version";
@@ -117,35 +116,13 @@ fn main() {
                         "device_class": d.device_class,
                         "state_class": d.state_class,
                         "diagnostic": d.diagnostic,
-                        "legacy": d.legacy,
+                        "default_on": d.default_on,
                         "recommended": d.recommended,
                         "default_interval": d.default_interval,
                     })
                 );
             }
             0
-        }
-        Some("--import-legacy") => {
-            let script = args.get(1).map_or(legacy::SCRIPT, String::as_str);
-            match legacy::import(std::path::Path::new(script)) {
-                Ok(b) => {
-                    // Nothing that identifies the broker or its account is
-                    // printed: the output ends up in terminals and logs.
-                    out!(
-                        "imported the broker settings (password {})",
-                        if b.password.is_some() {
-                            "set"
-                        } else {
-                            "not set"
-                        }
-                    );
-                    0
-                }
-                Err(e) => {
-                    eprintln!("{e}");
-                    1
-                }
-            }
         }
         Some("--purge") => daemon::purge_once(),
         Some("--version") => {

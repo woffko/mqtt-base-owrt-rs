@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Small text helpers shared by the catalog, discovery and status code.
 
-/// Legacy object-id sanitizer: `tr -c 'A-Za-z0-9_-' '_'`.
+/// Object-id sanitizer, the same as `tr -c 'A-Za-z0-9_-' '_'`: the default
+/// entity ids depend on it.
 pub fn sanitize_id(value: &str) -> String {
     value
         .chars()
@@ -92,7 +93,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sanitizers_match_legacy_tr() {
+    fn sanitizers_match_tr() {
         assert_eq!(sanitize_id("wan_6"), "wan_6");
         assert_eq!(sanitize_id("router-primary"), "router-primary");
         assert_eq!(sanitize_id("bond0.87"), "bond0_87");

@@ -78,9 +78,9 @@ pub struct EntityView<'a> {
     pub ha_enabled: bool,
 }
 
-/// Discovery payload. It contains every field the legacy script sent (with
-/// the same values for legacy entities) plus availability, state class,
-/// entity category and origin.
+/// Discovery payload: name, ids, topics, classes and icon, plus availability,
+/// state class, entity category and origin. The fields and values of the
+/// default entities must stay the same (tests/topic_compatibility.rs).
 pub fn discovery_payload(e: &EntityView, id: &Identity) -> String {
     let mut m = Map::new();
     m.insert("name".into(), json!(e.name));
@@ -131,7 +131,7 @@ mod tests {
     use crate::catalog::{IFACE_STATUS, SYSTEM_UPTIME};
 
     #[test]
-    fn default_identity_matches_legacy() {
+    fn default_identity() {
         let id = Identity::resolve(&Config::default(), "router-primary");
         assert_eq!(id.base, "openwrt/router-primary");
         assert_eq!(id.device_id, "openwrt_router-primary");
@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn payload_contains_legacy_fields() {
+    fn payload_contains_the_expected_fields() {
         let id = Identity::resolve(&Config::default(), "r1");
         let payload = discovery_payload(
             &EntityView {

@@ -4,7 +4,7 @@
 //! `mqtt-metrics call <method>` with the arguments as JSON on stdin.
 //!
 //! Replies never contain the broker password. Read methods are `status`,
-//! `catalog`, `preview`, `legacy` and `log`; everything else is a write
+//! `catalog`, `preview` and `log`; everything else is a write
 //! method in the ACL.
 
 use std::io::Read;
@@ -20,7 +20,6 @@ use crate::control::{self, Command};
 use crate::engine::{self, Entry};
 use crate::exec;
 use crate::ha::Identity;
-use crate::legacy;
 use crate::mqtt::{Client, Options};
 use crate::source::{Source, SystemSource};
 use crate::state::write_atomic;
@@ -45,14 +44,12 @@ pub fn methods() -> Value {
         "status": {},
         "catalog": {},
         "preview": { "key": "str" },
-        "legacy": {},
         "log": {},
         "test_connection": {
             "host": "str", "port": 1883, "username": "str", "password": "str",
             "keep_password": true, "tls": true, "tls_verify": true
         },
         "set_password": { "password": "str" },
-        "import_legacy": {},
         "republish": {},
         "purge": {},
         "reload": {}
@@ -64,11 +61,9 @@ pub fn call(method: &str, args: &Value) -> Value {
         "status" => status(),
         "catalog" => catalog(&SystemSource),
         "preview" => preview(&SystemSource, args),
-        "legacy" => legacy_status(),
         "log" => log(),
         "test_connection" => test_connection(args),
         "set_password" => set_password(args),
-        "import_legacy" => import_legacy(),
         "republish" => control_command(Command::Republish),
         "purge" => control_command(Command::Purge),
         "reload" => control_command(Command::Reload),
@@ -180,7 +175,7 @@ fn entry_json(e: &Entry, cfg: &Config, last: Option<&Value>) -> Value {
         "reason": reason,
         "permanent": permanent,
         "publish": e.publish,
-        "default_publish": e.def.legacy,
+        "default_publish": e.def.default_on,
         "discovery": e.discovery,
         "announced": e.announce(cfg),
         "ha_enabled": e.ha_enabled,
@@ -188,7 +183,6 @@ fn entry_json(e: &Entry, cfg: &Config, last: Option<&Value>) -> Value {
         "default_diagnostic": e.def.diagnostic,
         "interval": e.interval,
         "interval_override": defaults_over.interval,
-        "legacy": e.def.legacy,
         "recommended": e.def.recommended,
         "overridden": cfg.metrics.contains_key(&e.key),
     })
@@ -224,7 +218,6 @@ fn full_round(source: &dyn Source, cfg: &Config) -> (Identity, engine::Round) {
         source.now(),
         0.0,
         &mut CollectorState::default(),
-        false,
     );
     (id, round)
 }
@@ -291,7 +284,7 @@ pub fn catalog(source: &dyn Source) -> Value {
                     json!({
                         "name": n,
                         "proto": v.proto(n),
-                        "legacy_wan": net::legacy_wan(n),
+                        "auto_wan": net::auto_wan(n),
                         "selected": v.selected.iter().any(|(s, _)| s == n),
                         "device": v.dump.get(n).and_then(net::l3_device),
                     })
@@ -364,29 +357,6 @@ fn preview(source: &dyn Source, args: &Value) -> Value {
         }),
         None => json!({ "error": format!("metric {key} is not available on this router") }),
     }
-}
-
-fn legacy_status() -> Value {
-    let d = legacy::detect();
-    let parsed = std::fs::read_to_string(legacy::SCRIPT)
-        .ok()
-        .map(|t| legacy::parse_script(&t));
-    let import_error = match &parsed {
-        Some(Err(e)) => Some(e.clone()),
-        _ => None,
-    };
-    let broker = parsed.and_then(Result::ok);
-    json!({
-        "script": d.script,
-        "marker": d.marker,
-        "cron": d.cron,
-        "rc_local": d.rc_local,
-        "active": d.cron,
-        "importable": broker.is_some(),
-        "import_error": import_error,
-        "broker_host": broker.as_ref().map(|b| b.host.clone()),
-        "broker_username": broker.as_ref().and_then(|b| b.username.clone()),
-    })
 }
 
 fn log() -> Value {
@@ -533,20 +503,6 @@ fn set_password(args: &Value) -> Value {
     }
 }
 
-fn import_legacy() -> Value {
-    match legacy::import(Path::new(legacy::SCRIPT)) {
-        Ok(b) => json!({
-            "ok": true,
-            "host": b.host,
-            "port": b.port,
-            "username": b.username,
-            "password_set": b.password.is_some(),
-            "reload_warning": reload_daemon(),
-        }),
-        Err(e) => json!({ "ok": false, "error": e }),
-    }
-}
-
 fn control_command(command: Command) -> Value {
     match control::send(&control_path(), command, Duration::from_secs(20)) {
         Ok((ok, message)) => json!({ "ok": ok, "message": message }),
@@ -638,7 +594,7 @@ mod tests {
             .find(|m| m["key"] == "system_uptime")
             .unwrap();
         assert_eq!(uptime["publish"], true);
-        assert_eq!(uptime["legacy"], true);
+        assert_eq!(uptime["default_publish"], true);
         assert_eq!(uptime["topic"], "openwrt/router-primary/system/uptime");
         let load = metrics
             .iter()

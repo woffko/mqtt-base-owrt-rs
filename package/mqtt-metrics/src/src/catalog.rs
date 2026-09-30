@@ -6,14 +6,17 @@
 //! placeholders:
 //!
 //! - `{p}` / `{P}`: instance family prefix, e.g. `wan` / `WAN` for interfaces
-//!   selected by the legacy WAN rule and `iface` / `Interface` for others;
+//!   selected by the automatic `wan*`/`wwan*` rule and `iface` / `Interface`
+//!   for others;
 //! - `{n}`: raw instance name, `{i}`: sanitized instance name;
 //! - `{m}`: raw sub-instance name, `{j}`: sanitized sub-instance name.
 //!
-//! Metrics flagged `legacy` reproduce the legacy `publish_metrics.sh` output
-//! exactly (object id, topic, name, icon, classes) and are on by default.
-//! Everything else is opt-in; `recommended` marks the set that the LuCI
-//! "Recommended set" action turns on.
+//! Metrics flagged `default_on` are published without any configuration.
+//! Their object ids, topics, names, icons and classes must not change:
+//! Home Assistant keeps the history of an entity only while they stay the
+//! same (tests/topic_compatibility.rs). Everything else is opt-in;
+//! `recommended` marks the set that the LuCI "Recommended set" action turns
+//! on.
 
 use crate::text::{sanitize_id, sanitize_topic_level};
 
@@ -109,7 +112,8 @@ pub struct MetricDef {
     pub unit: Option<&'static str>,
     pub state_class: Option<&'static str>,
     pub diagnostic: bool,
-    pub legacy: bool,
+    /// Published by default, for every instance the router has.
+    pub default_on: bool,
     pub recommended: bool,
     /// Group-specific default interval in seconds (slow sources).
     pub default_interval: Option<u32>,
@@ -143,7 +147,7 @@ const fn sensor(
         unit: None,
         state_class: None,
         diagnostic: false,
-        legacy: false,
+        default_on: false,
         recommended: false,
         default_interval: None,
     }
@@ -187,8 +191,8 @@ impl MetricDef {
         self.diagnostic = true;
         self
     }
-    const fn legacy(mut self) -> MetricDef {
-        self.legacy = true;
+    const fn default_on(mut self) -> MetricDef {
+        self.default_on = true;
         self
     }
     const fn rec(mut self) -> MetricDef {
@@ -216,7 +220,7 @@ pub static SYSTEM_HOSTNAME: MetricDef = sensor(
     "Hostname",
 )
 .icon("mdi:router-network")
-.legacy();
+.default_on();
 pub static SYSTEM_MODEL: MetricDef = sensor(
     "system.model",
     System,
@@ -225,7 +229,7 @@ pub static SYSTEM_MODEL: MetricDef = sensor(
     "Model",
 )
 .icon("mdi:router")
-.legacy();
+.default_on();
 pub static SYSTEM_TARGET: MetricDef = sensor(
     "system.target_platform",
     System,
@@ -234,7 +238,7 @@ pub static SYSTEM_TARGET: MetricDef = sensor(
     "Target Platform",
 )
 .icon("mdi:chip")
-.legacy();
+.default_on();
 pub static SYSTEM_ARCH: MetricDef = sensor(
     "system.architecture",
     System,
@@ -243,7 +247,7 @@ pub static SYSTEM_ARCH: MetricDef = sensor(
     "Architecture",
 )
 .icon("mdi:cpu-64-bit")
-.legacy();
+.default_on();
 pub static SYSTEM_VERSION: MetricDef = sensor(
     "system.version",
     System,
@@ -252,7 +256,7 @@ pub static SYSTEM_VERSION: MetricDef = sensor(
     "Version",
 )
 .icon("mdi:tag")
-.legacy();
+.default_on();
 pub static SYSTEM_UPTIME: MetricDef = sensor(
     "system.uptime",
     System,
@@ -263,7 +267,7 @@ pub static SYSTEM_UPTIME: MetricDef = sensor(
 .icon("mdi:clock-outline")
 .class("duration")
 .unit("s")
-.legacy();
+.default_on();
 pub static SYSTEM_REVISION: MetricDef = sensor(
     "system.revision",
     System,
@@ -453,7 +457,7 @@ pub static IFACE_STATUS: MetricDef = sensor(
 )
 .kind(UP_DOWN)
 .class("connectivity")
-.legacy();
+.default_on();
 pub static IFACE_DEVICE: MetricDef = sensor(
     "iface.device",
     Interface,
@@ -462,7 +466,7 @@ pub static IFACE_DEVICE: MetricDef = sensor(
     "{P} {n} Device",
 )
 .icon("mdi:ethernet")
-.legacy();
+.default_on();
 pub static IFACE_IPV4: MetricDef = sensor(
     "iface.ipv4",
     Interface,
@@ -471,7 +475,7 @@ pub static IFACE_IPV4: MetricDef = sensor(
     "{P} {n} IPv4",
 )
 .icon("mdi:ip-network")
-.legacy();
+.default_on();
 pub static IFACE_IPV6: MetricDef = sensor(
     "iface.ipv6",
     Interface,
@@ -480,7 +484,7 @@ pub static IFACE_IPV6: MetricDef = sensor(
     "{P} {n} IPv6",
 )
 .icon("mdi:ip-network-outline")
-.legacy();
+.default_on();
 pub static IFACE_GW4: MetricDef = sensor(
     "iface.gateway4",
     Interface,
@@ -489,7 +493,7 @@ pub static IFACE_GW4: MetricDef = sensor(
     "{P} {n} Gateway4",
 )
 .icon("mdi:routes")
-.legacy();
+.default_on();
 pub static IFACE_GW6: MetricDef = sensor(
     "iface.gateway6",
     Interface,
@@ -498,7 +502,7 @@ pub static IFACE_GW6: MetricDef = sensor(
     "{P} {n} Gateway6",
 )
 .icon("mdi:routes")
-.legacy();
+.default_on();
 pub static IFACE_PROTO: MetricDef = sensor(
     "iface.proto",
     Interface,
@@ -885,6 +889,8 @@ pub static WIFI_TXPOWER: MetricDef = sensor(
 .diag();
 
 // Services -------------------------------------------------------------
+/// Instances exist only for the services selected in LuCI, and selecting a
+/// service is the request to publish it.
 pub static SERVICE_RUNNING: MetricDef = binary(
     "service.running",
     Service,
@@ -892,7 +898,8 @@ pub static SERVICE_RUNNING: MetricDef = binary(
     "service-{n}/running",
     "Service {n}",
 )
-.class("running");
+.class("running")
+.default_on();
 
 /// Every template, in display order.
 pub static ALL: &[&MetricDef] = &[
@@ -970,7 +977,7 @@ pub static ALL: &[&MetricDef] = &[
 /// Family prefix for interface-like instances.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
-    /// Interfaces selected by the legacy `wan*`/`wwan*` rule.
+    /// Interfaces selected by the automatic `wan*`/`wwan*` rule.
     Wan,
     /// Any other interface.
     Iface,
@@ -1097,13 +1104,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_set_matches_script() {
-        let legacy: Vec<&str> = ALL.iter().filter(|d| d.legacy).map(|d| d.id).collect();
-        assert_eq!(legacy.len(), 12);
+    fn the_default_set_is_stable() {
+        // Six system values, six per interface, and the selected services.
+        let on: Vec<&str> = ALL.iter().filter(|d| d.default_on).map(|d| d.id).collect();
+        assert_eq!(on.len(), 13, "{on:?}");
+        assert!(on.contains(&"service.running"));
     }
 
     #[test]
-    fn expands_legacy_wan_templates() {
+    fn expands_wan_templates() {
         let inst = Instance::iface(Family::Wan, "wan_6");
         assert_eq!(expand(IFACE_STATUS.object, &inst), "wan_wan_6_status");
         assert_eq!(expand(IFACE_STATUS.topic, &inst), "wan-wan_6/status");

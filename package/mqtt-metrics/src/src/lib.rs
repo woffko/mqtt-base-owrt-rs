@@ -16,7 +16,6 @@ pub mod daemon;
 pub mod engine;
 pub mod exec;
 pub mod ha;
-pub mod legacy;
 pub mod log;
 pub mod mqtt;
 pub mod rpcd;

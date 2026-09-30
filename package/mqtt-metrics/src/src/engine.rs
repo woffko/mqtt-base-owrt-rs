@@ -7,11 +7,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::catalog::{self, expand, expand_topic, Family, Group, Instance, MetricDef};
-use crate::collect::{self, net, CollectorState, Context, Reading, RoundCache, Sample};
+use crate::catalog::{self, expand, expand_topic, Group, Instance, MetricDef};
+use crate::collect::{self, CollectorState, Context, Reading, RoundCache, Sample};
 use crate::config::Config;
 use crate::ha::{self, EntityView, Identity};
-use crate::legacy;
 use crate::source::Source;
 use crate::state::TopicState;
 use crate::text::{sanitize_id, sanitize_key};
@@ -155,7 +154,7 @@ pub fn resolve(sample: Sample, cfg: &Config, id: &Identity) -> Entry {
             .clone()
             .unwrap_or_else(|| expand(def.name, &sample.inst)),
         icon: over.icon.clone().or_else(|| def.icon.map(str::to_string)),
-        publish: over.publish.unwrap_or(def.legacy),
+        publish: over.publish.unwrap_or(def.default_on),
         discovery: over.discovery.unwrap_or(true),
         ha_enabled: over.ha_enabled.unwrap_or(true),
         diagnostic: over.diagnostic.unwrap_or(def.diagnostic),
@@ -174,9 +173,6 @@ pub fn resolve(sample: Sample, cfg: &Config, id: &Identity) -> Entry {
 pub struct Round {
     pub entries: Vec<Entry>,
     pub missing: Vec<(Group, &'static MetricDef, String)>,
-    /// UCI interfaces matching the legacy WAN rule (when the network view
-    /// was available).
-    pub legacy_wan: Option<Vec<String>>,
     /// Groups whose source could not be read. Instances missing from such a
     /// group have not necessarily gone away.
     pub failed: Vec<Group>,
@@ -211,7 +207,6 @@ pub fn collect_round(
     now: u64,
     mono: f64,
     state: &mut CollectorState,
-    want_legacy_wan: bool,
 ) -> Round {
     let ctx = Context {
         source,
@@ -239,40 +234,7 @@ pub fn collect_round(
             .missing
             .extend(result.missing.into_iter().map(|(d, r)| (*group, d, r)));
     }
-    if want_legacy_wan {
-        if let Ok(view) = cache.net(&ctx) {
-            let mut names: Vec<String> = view
-                .uci
-                .iter()
-                .map(|i| i.name.clone())
-                .filter(|n| net::legacy_wan(n))
-                .collect();
-            names.sort();
-            round.legacy_wan = Some(names);
-        }
-    }
     round
-}
-
-/// Retained topics that the legacy script published for `hostname`.
-pub fn legacy_topics(hostname: &str, wan: &[String]) -> BTreeSet<String> {
-    let id = Identity::resolve(&Config::default(), hostname);
-    let mut out = BTreeSet::new();
-    for def in catalog::ALL.iter().copied().filter(|d| d.legacy) {
-        let instances: Vec<Instance> = match def.group {
-            Group::Interface => wan
-                .iter()
-                .map(|n| Instance::iface(Family::Wan, n))
-                .collect(),
-            _ => vec![Instance::none()],
-        };
-        for inst in instances {
-            let unique_id = format!("{}_{}", id.device_id, default_object(def, &inst));
-            out.insert(id.config_topic(def.kind, &unique_id));
-            out.insert(format!("{}/{}", id.base, expand_topic(def.topic, &inst)));
-        }
-    }
-    out
 }
 
 /// What the broker holds for an entry's state topic.
@@ -442,7 +404,7 @@ impl Engine {
         def: &'static MetricDef,
         by_default: bool,
     ) -> impl Iterator<Item = u32> + '_ {
-        let default = (by_default && def.legacy).then(|| interval_for(&self.cfg, def, None));
+        let default = (by_default && def.default_on).then(|| interval_for(&self.cfg, def, None));
         let overridden = self
             .cfg
             .metrics
@@ -524,14 +486,6 @@ impl Engine {
     /// configuration change and when Home Assistant comes online.
     pub fn full_pass(&mut self, source: &dyn Source, now: u64, mono: f64) -> Vec<Publication> {
         let groups = self.enabled_groups();
-        // Adopting the legacy script's topics clears whatever this
-        // configuration no longer wants. While the script is still scheduled
-        // it would publish them again, so wait until it is gone.
-        let legacy_running = legacy::cron_active(&source.read(legacy::CRONTAB).unwrap_or_default());
-        let seed = self.cfg.identity.discovery
-            && self.cfg.identity.cleanup_legacy
-            && !self.topics.legacy_seeded
-            && !legacy_running;
         let round = collect_round(
             &groups,
             &self.cfg,
@@ -540,7 +494,6 @@ impl Engine {
             now,
             mono,
             &mut self.collectors,
-            seed,
         );
         self.missing = round.missing;
         let previous = std::mem::take(&mut self.entries);
@@ -564,16 +517,6 @@ impl Engine {
         // nothing wants them, and if it comes back it is announced again.
         self.tracks.retain(|key, _| self.entries.contains_key(key));
 
-        if seed {
-            if let Some(wan) = &round.legacy_wan {
-                self.topics
-                    .topics
-                    .extend(legacy_topics(&self.id.hostname, wan));
-                self.topics.legacy_seeded = true;
-                self.topics_dirty = true;
-            }
-        }
-
         // The availability topic is owned as well: when the base topic or node
         // changes while the service is not connected, the old one is cleared.
         let mut want = BTreeSet::from([self.id.availability_topic.clone()]);
@@ -582,7 +525,7 @@ impl Engine {
                 want.insert(e.config_topic.clone());
             }
             // A permanently unavailable value never gets a state, so a
-            // retained state left by the legacy script is cleared.
+            // retained state left from before is cleared.
             if e.publish && !e.permanent() {
                 want.insert(e.state_topic.clone());
             }
@@ -704,7 +647,6 @@ impl Engine {
             now,
             mono,
             &mut self.collectors,
-            false,
         );
         let fresh_keys: BTreeSet<String> = round.entries.iter().map(|e| e.key.clone()).collect();
         let mut out = Vec::new();
@@ -852,6 +794,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::Family;
     use crate::collect::tests::fixture;
     use crate::config::MetricOverride;
 
@@ -894,39 +837,24 @@ mod tests {
     }
 
     #[test]
-    fn first_full_pass_publishes_legacy_set_and_clears_impossible_entities() {
+    fn first_full_pass_publishes_the_default_set() {
         let src = fixture("primary");
         let mut engine = Engine::new(Config::default(), "router-primary", TopicState::default());
         let out = engine.full_pass(&src, src.now(), 0.0);
         let published = topics_of(&out);
-        let cleared: BTreeSet<String> = out
-            .iter()
-            .filter(|p| p.payload.is_empty())
-            .map(|p| p.topic.clone())
-            .collect();
-        let legacy = legacy_topics(
-            "router-primary",
-            &["wan".into(), "wan_6".into(), "wanb".into(), "wanb_6".into()],
-        );
-        // Everything published belongs to the legacy topic set.
-        assert!(
-            published.is_subset(&legacy),
-            "{:#?}",
-            published.difference(&legacy).collect::<Vec<_>>()
-        );
-        // Impossible entities (IPv6 on pppoe/static, IPv4 on dhcpv6) are cleared.
+        // Impossible entities (IPv6 on pppoe/static, IPv4 on dhcpv6) are not
+        // announced.
         for gone in [
             "homeassistant/sensor/openwrt_router-primary_wan_wan_ipv6/config",
             "homeassistant/sensor/openwrt_router-primary_wan_wan_gateway6/config",
             "homeassistant/sensor/openwrt_router-primary_wan_wan_6_ipv4/config",
             "homeassistant/sensor/openwrt_router-primary_wan_wanb_gateway6/config",
         ] {
-            assert!(cleared.contains(gone), "{gone}");
+            assert!(!published.contains(gone), "{gone}");
         }
         assert!(published
             .contains("homeassistant/binary_sensor/openwrt_router-primary_wan_wan_status/config"));
         assert!(published.contains("openwrt/router-primary/system/uptime"));
-        assert!(engine.topics().legacy_seeded);
         assert!(engine.take_dirty_topics().is_some());
         // Every topic is written once per pass.
         let mut seen = BTreeSet::new();
@@ -954,7 +882,6 @@ mod tests {
                 .all(|p| p.topic.starts_with("openwrt-shadow/router-primary/")),
             "{out:#?}"
         );
-        assert!(!engine.topics().legacy_seeded);
     }
 
     #[test]
@@ -1061,7 +988,7 @@ mod tests {
         assert_eq!(engine.next_due(), Some(300.0));
         assert!(engine.tick(&src, src.now(), 100.0).is_empty());
         let out = engine.tick(&src, src.now(), 300.0);
-        // All legacy states are republished; discovery is not repeated.
+        // All default states are republished; discovery is not repeated.
         assert!(out.iter().all(|p| !p.topic.ends_with("/config")));
         assert_eq!(out.len(), 6 + 4 + 4 + 2 + 2 + 2 + 2);
 
@@ -1162,6 +1089,37 @@ mod tests {
             Some("")
         );
         assert_eq!(payload_of(&out, "home/r/router-primary/availability"), None);
+    }
+
+    #[test]
+    fn a_selected_service_is_published_without_further_settings() {
+        let src = fixture("primary");
+        let mut cfg = Config::default();
+        cfg.select.services = vec!["dnsmasq".into()];
+        let mut engine = Engine::new(cfg.clone(), "router-primary", TopicState::default());
+        let out = engine.full_pass(&src, src.now(), 0.0);
+        assert_eq!(
+            payload_of(&out, "openwrt/router-primary/service-dnsmasq/running"),
+            Some("ON")
+        );
+        assert!(out.iter().any(|p| p.topic
+            == "homeassistant/binary_sensor/openwrt_router-primary_service_dnsmasq_running/config"
+            && !p.payload.is_empty()));
+
+        // Switching it off on the Metrics page still wins.
+        cfg.metrics.insert(
+            "service_dnsmasq_running".into(),
+            MetricOverride {
+                publish: Some(false),
+                ..MetricOverride::default()
+            },
+        );
+        engine.reconfigure(cfg, "router-primary");
+        let out = engine.full_pass(&src, src.now(), 10.0);
+        assert_eq!(
+            payload_of(&out, "openwrt/router-primary/service-dnsmasq/running"),
+            Some("")
+        );
     }
 
     #[test]
@@ -1465,33 +1423,6 @@ mod tests {
         assert_eq!(configs.len(), 3, "{configs:#?}");
     }
 
-    struct WithCron<'a> {
-        inner: &'a dyn Source,
-        crontab: &'a str,
-    }
-
-    impl Source for WithCron<'_> {
-        fn ubus(&self, o: &str, m: &str, a: Option<&str>) -> SourceResult<Value> {
-            self.inner.ubus(o, m, a)
-        }
-        fn read(&self, path: &str) -> SourceResult<String> {
-            if path == "/etc/crontabs/root" {
-                Ok(self.crontab.to_string())
-            } else {
-                self.inner.read(path)
-            }
-        }
-        fn list_dir(&self, path: &str) -> SourceResult<Vec<String>> {
-            self.inner.list_dir(path)
-        }
-        fn command(&self, program: &str, args: &[&str]) -> SourceResult<String> {
-            self.inner.command(program, args)
-        }
-        fn now(&self) -> u64 {
-            self.inner.now()
-        }
-    }
-
     /// Records the `ubus` objects and commands a pass uses.
     struct Recorder<'a> {
         inner: &'a dyn Source,
@@ -1568,48 +1499,5 @@ mod tests {
         );
         engine.full_pass(&rec, src.now(), 0.0);
         assert!(rec.calls().iter().any(|c| c.contains("ha-cluster")));
-    }
-
-    #[test]
-    fn legacy_adoption_waits_until_the_legacy_cron_line_is_gone() {
-        let src = fixture("primary");
-        let cron = WithCron {
-            inner: &src,
-            crontab:
-                "0 3 * * 3 /etc/init.d/adblock reload\n*/5 * * * * /usr/bin/publish_metrics.sh\n",
-        };
-        let mut cfg = Config::default();
-        cfg.identity.device_id = Some("gw1".into());
-        let mut engine = Engine::new(cfg, "router-primary", TopicState::default());
-
-        // The legacy script still publishes: leave its retained topics alone.
-        // Nothing is cleared, and nothing is adopted for later cleaning.
-        let out = engine.full_pass(&cron, src.now(), 0.0);
-        assert!(
-            out.iter().all(|p| !p.payload.is_empty()),
-            "cleared while the legacy script is scheduled: {:#?}",
-            out.iter()
-                .filter(|p| p.payload.is_empty())
-                .collect::<Vec<_>>()
-        );
-        assert!(!out
-            .iter()
-            .any(|p| p.topic.contains("openwrt_router-primary_")));
-        assert!(!engine.topics().legacy_seeded);
-
-        // Once the cron line is removed the leftovers are adopted and cleared.
-        let none = WithCron {
-            inner: &src,
-            crontab: "0 3 * * 3 /etc/init.d/adblock reload\n",
-        };
-        let out = engine.full_pass(&none, src.now(), 10.0);
-        let cleared = out
-            .iter()
-            .filter(|p| p.payload.is_empty() && p.topic.contains("openwrt_router-primary_"))
-            .count();
-        // All 30 legacy discovery configs: the 22 that were announced plus
-        // the 8 that could never have a value.
-        assert_eq!(cleared, 30);
-        assert!(engine.topics().legacy_seeded);
     }
 }

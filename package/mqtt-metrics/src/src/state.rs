@@ -15,8 +15,6 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TopicState {
-    /// The legacy script's topics were adopted into `topics`.
-    pub legacy_seeded: bool,
     pub topics: BTreeSet<String>,
 }
 
@@ -24,7 +22,6 @@ impl TopicState {
     pub fn to_json(&self) -> String {
         json!({
             "version": 1,
-            "legacy_seeded": self.legacy_seeded,
             "topics": self.topics.iter().collect::<Vec<_>>(),
         })
         .to_string()
@@ -35,11 +32,9 @@ impl TopicState {
         if v.get("version").and_then(Value::as_u64) != Some(1) {
             return None;
         }
+        // Fields other than `topics` (an older version wrote `legacy_seeded`)
+        // are ignored.
         Some(TopicState {
-            legacy_seeded: v
-                .get("legacy_seeded")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
             topics: v
                 .get("topics")
                 .and_then(Value::as_array)
@@ -94,15 +89,16 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let mut s = TopicState {
-            legacy_seeded: true,
-            ..TopicState::default()
-        };
+        let mut s = TopicState::default();
         s.topics.insert("a/b".into());
         s.topics.insert("c".into());
         assert_eq!(TopicState::from_json(&s.to_json()), Some(s));
         assert_eq!(TopicState::from_json("{\"version\":2}"), None);
         assert_eq!(TopicState::from_json("garbage"), None);
+        // A file written by an older version.
+        let old =
+            TopicState::from_json(r#"{"version":1,"legacy_seeded":true,"topics":["x"]}"#).unwrap();
+        assert_eq!(old.topics.len(), 1);
     }
 
     #[test]

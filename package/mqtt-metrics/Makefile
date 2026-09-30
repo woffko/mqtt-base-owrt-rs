@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mqtt-metrics
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=7
+PKG_RELEASE:=8
 
 PKG_MAINTAINER:=woffko
 PKG_LICENSE:=GPL-2.0-or-later
@@ -20,15 +20,14 @@ define Package/mqtt-metrics
   CATEGORY:=Utilities
   TITLE:=Read-only router metrics publisher for MQTT and Home Assistant
   URL:=https://github.com/woffko/mqtt-base-owrt-rs
-  DEPENDS:=$(RUST_ARCH_DEPENDS) +uci +ubus
+  DEPENDS:=$(RUST_ARCH_DEPENDS) +uci +ubus +libgcc +ca-bundle
 endef
 
 define Package/mqtt-metrics/description
   Publishes router state (system, interfaces, traffic, mwan3, HA cluster,
   DHCP, WireGuard, Wi-Fi, services) to an MQTT broker with Home Assistant
-  discovery over one persistent connection. The defaults reproduce the
-  legacy publish_metrics.sh topics and entity ids. The integration is
-  read-only: it never acts on messages received from MQTT.
+  discovery over one persistent connection. The integration is read-only:
+  it never acts on messages received from MQTT.
 endef
 
 define Package/mqtt-metrics/conffiles

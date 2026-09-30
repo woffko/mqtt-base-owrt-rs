@@ -30,8 +30,8 @@ pub struct NetView {
     pub selected: Vec<(String, Family)>,
 }
 
-/// The legacy script's rule: `^(wan([A-Za-z0-9_]+)?|wwan([A-Za-z0-9_]+)?)$`.
-pub fn legacy_wan(name: &str) -> bool {
+/// The automatic selection: `^(wan([A-Za-z0-9_]+)?|wwan([A-Za-z0-9_]+)?)$`.
+pub fn auto_wan(name: &str) -> bool {
     let rest = name
         .strip_prefix("wwan")
         .or_else(|| name.strip_prefix("wan"));
@@ -39,7 +39,7 @@ pub fn legacy_wan(name: &str) -> bool {
 }
 
 pub fn family(name: &str) -> Family {
-    if legacy_wan(name) {
+    if auto_wan(name) {
         Family::Wan
     } else {
         Family::Iface
@@ -78,7 +78,7 @@ pub fn view(source: &dyn Source, cfg: &Config) -> SourceResult<NetView> {
     let mut selected: Vec<String> = if cfg.select.interfaces_auto {
         let mut names: Vec<String> = uci_ifaces
             .iter()
-            .filter(|i| legacy_wan(&i.name))
+            .filter(|i| auto_wan(&i.name))
             .map(|i| i.name.clone())
             .collect();
         names.sort();
@@ -250,17 +250,17 @@ mod tests {
     use crate::collect::tests::fixture;
 
     #[test]
-    fn legacy_rule() {
+    fn automatic_rule() {
         for name in ["wan", "wan_6", "wanb", "wanb_6", "wwan", "wwan0"] {
-            assert!(legacy_wan(name), "{name}");
+            assert!(auto_wan(name), "{name}");
         }
         for name in ["lan", "wireguard", "wa", "xwan"] {
-            assert!(!legacy_wan(name), "{name}");
+            assert!(!auto_wan(name), "{name}");
         }
     }
 
     #[test]
-    fn auto_selection_matches_legacy_script() {
+    fn automatic_selection() {
         let v = view(&fixture("primary"), &Config::default()).unwrap();
         let names: Vec<&str> = v.selected.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, vec!["wan", "wan_6", "wanb", "wanb_6"]);

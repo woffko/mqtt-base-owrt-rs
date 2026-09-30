@@ -24,7 +24,6 @@ config identity 'identity'
 	option device_name ''
 	option manufacturer 'OpenWrt'
 	option model 'Router'
-	option cleanup_legacy '1'
 
 config publish 'publish'
 	option interval '300'

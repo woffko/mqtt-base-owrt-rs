@@ -240,7 +240,7 @@ pub fn clock_is_set(now: u64) -> bool {
     now >= CLOCK_SET_AFTER
 }
 
-/// Runtime hostname, as the legacy script resolves it.
+/// Runtime hostname: the UCI hostname, then the kernel's, then `openwrt`.
 pub fn hostname(source: &dyn Source) -> String {
     if let Ok(name) = source.command("uci", &["-q", "get", "system.@system[0].hostname"]) {
         let name = name.trim();

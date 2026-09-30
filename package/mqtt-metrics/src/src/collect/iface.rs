@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! Per-interface metrics. The six legacy values follow `network.sh`
+//! Per-interface metrics. The six default values follow `network.sh`
 //! (`network_is_up`, `network_get_device`, `network_get_ipaddr`,
-//! `network_get_ipaddrs6`, `network_get_gateway[6]`) with two fixes:
-//! link-local IPv6 addresses are dropped, and values that the interface's
-//! protocol can never have are marked permanent so they are not announced.
+//! `network_get_ipaddrs6`, `network_get_gateway[6]`), except that link-local
+//! IPv6 addresses are dropped and values that the interface's protocol can
+//! never have are marked permanent so they are not announced.
 
 use serde_json::Value as Json;
 
@@ -172,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn wan_values_match_legacy_output() {
+    fn wan_values_from_fixture() {
         let src = fixture("primary");
         let r = run(
             Group::Interface,
@@ -198,8 +198,8 @@ mod tests {
         let v6 = payload(value_of(&r, "iface.ipv6", "wan_6", "")).unwrap();
         assert_eq!(v6.split(',').count(), 2);
         assert!(v6.starts_with("2001:db8:"));
-        // Fixed legacy defects: no link-local address on PPPoE, and
-        // impossible fields are permanent.
+        // No link-local address on PPPoE, and impossible fields are
+        // permanent.
         assert!(matches!(
             value_of(&r, "iface.ipv6", "wan", ""),
             Some(Reading::Unavailable {
