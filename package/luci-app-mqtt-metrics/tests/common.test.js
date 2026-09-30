@@ -16,12 +16,12 @@ const mm = new Function('baseclass', 'rpc', 'document', source)(baseclass, rpc, 
 const uptime = {
 	key: 'system_uptime', group: 'system', default_publish: true, default_diagnostic: false,
 	default_name: 'Uptime', default_object_id: 'system_uptime', default_topic: 'system/uptime',
-	default_icon: 'mdi:clock-outline', legacy: true, recommended: false
+	default_icon: 'mdi:clock-outline', recommended: false
 };
 const load = {
 	key: 'system_load_1', group: 'system', default_publish: false, default_diagnostic: false,
 	default_name: 'Load (1 min)', default_object_id: 'system_load_1', default_topic: 'system/load_1',
-	default_icon: 'mdi:gauge', legacy: false, recommended: true
+	default_icon: 'mdi:gauge', recommended: true
 };
 const cpu0 = Object.assign({}, load, { key: 'system_cpu0_usage', recommended: false });
 
@@ -30,7 +30,7 @@ let ops = mm.overrideOptions(uptime, mm.defaultsOf(uptime));
 assert.equal(ops.empty, true);
 assert.deepEqual(ops.set, {});
 
-// Hiding a legacy metric stores publish=0 only.
+// Hiding a default metric stores publish=0 only.
 ops = mm.overrideOptions(uptime, Object.assign(mm.defaultsOf(uptime), { publish: false }));
 assert.deepEqual(ops.set, { publish: '0' });
 assert.ok(ops.unset.includes('name') && ops.unset.includes('interval'));
@@ -70,8 +70,8 @@ assert.equal(mm.validInterval('4', 5, 86400), false);
 assert.equal(mm.validInterval('300', 5, 86400), true);
 assert.equal(mm.validInterval('1e3', 5, 86400), false);
 
-// Recommended set turns on recommended and legacy metrics only.
-const desired = mm.legacyDefaults([ uptime, load, cpu0 ]);
+// Recommended set turns on recommended and default metrics only.
+const desired = mm.defaultSettings([ uptime, load, cpu0 ]);
 assert.equal(desired.system_uptime.publish, true);
 assert.equal(desired.system_load_1.publish, false);
 mm.applyRecommended([ uptime, load, cpu0 ], desired);

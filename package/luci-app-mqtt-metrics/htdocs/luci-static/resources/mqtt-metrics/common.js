@@ -12,7 +12,6 @@
 var callStatus = rpc.declare({ object: 'mqtt-metrics', method: 'status', reject: true });
 var callCatalog = rpc.declare({ object: 'mqtt-metrics', method: 'catalog', reject: true });
 var callPreview = rpc.declare({ object: 'mqtt-metrics', method: 'preview', params: [ 'key' ], reject: true });
-var callLegacy = rpc.declare({ object: 'mqtt-metrics', method: 'legacy', reject: true });
 var callLog = rpc.declare({ object: 'mqtt-metrics', method: 'log', reject: true });
 var callTest = rpc.declare({
 	object: 'mqtt-metrics',
@@ -21,7 +20,6 @@ var callTest = rpc.declare({
 	reject: true
 });
 var callSetPassword = rpc.declare({ object: 'mqtt-metrics', method: 'set_password', params: [ 'password' ], reject: true });
-var callImportLegacy = rpc.declare({ object: 'mqtt-metrics', method: 'import_legacy', reject: true });
 var callRepublish = rpc.declare({ object: 'mqtt-metrics', method: 'republish', reject: true });
 var callPurge = rpc.declare({ object: 'mqtt-metrics', method: 'purge', reject: true });
 var callReload = rpc.declare({ object: 'mqtt-metrics', method: 'reload', reject: true });
@@ -155,18 +153,18 @@ function groupMetrics(metrics) {
 	return out;
 }
 
-// Desired settings after the "Recommended set" action: legacy and
+// Desired settings after the "Recommended set" action: default and
 // recommended metrics published, nothing else changed.
 function applyRecommended(metrics, desired) {
 	(metrics || []).forEach(function(m) {
-		if (m.recommended || m.legacy)
+		if (m.recommended || m.default_publish)
 			desired[m.key].publish = true;
 	});
 	return desired;
 }
 
-// Desired settings after "Reset to legacy defaults": every override removed.
-function legacyDefaults(metrics) {
+// Desired settings after "Reset to defaults": every override removed.
+function defaultSettings(metrics) {
 	var desired = {};
 	(metrics || []).forEach(function(m) {
 		desired[m.key] = defaultsOf(m);
@@ -228,11 +226,9 @@ return baseclass.extend({
 	callStatus: callStatus,
 	callCatalog: callCatalog,
 	callPreview: callPreview,
-	callLegacy: callLegacy,
 	callLog: callLog,
 	callTest: callTest,
 	callSetPassword: callSetPassword,
-	callImportLegacy: callImportLegacy,
 	callRepublish: callRepublish,
 	callPurge: callPurge,
 	callReload: callReload,
@@ -249,7 +245,7 @@ return baseclass.extend({
 	validInterval: validInterval,
 	groupMetrics: groupMetrics,
 	applyRecommended: applyRecommended,
-	legacyDefaults: legacyDefaults,
+	defaultSettings: defaultSettings,
 	identityChanged: identityChanged,
 	IDENTITY_KEYS: IDENTITY_KEYS,
 	formatDuration: formatDuration,

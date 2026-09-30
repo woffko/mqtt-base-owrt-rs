@@ -28,7 +28,7 @@ return view.extend({
 
 		var m, s, o;
 		m = new form.Map('mqtt-metrics', _('MQTT Metrics: Topics and device'),
-			_('Defaults reproduce the legacy publish_metrics.sh script, so existing Home Assistant entities keep their history.'));
+			_('Topics and the device that Home Assistant shows for this router. Home Assistant keeps the history of an entity only while its unique_id stays the same.'));
 
 		var warning = E('div', { 'class': 'alert-message warning', 'style': 'display:none' }, [
 			mm.text(_('The base topic, node, discovery prefix or device ID changed. A new device ID creates new Home Assistant entities; their history does not carry over. A new base topic or node moves the state topics: anything else that reads the old topics must be updated. Home Assistant has to listen on the discovery prefix. The old retained topics are removed automatically.'))
@@ -89,11 +89,6 @@ return view.extend({
 		o = s.option(form.Value, 'configuration_url', _('Configuration URL'), _('Link shown on the Home Assistant device page, for example this LuCI page.'));
 		o.datatype = 'string';
 		o.placeholder = window.location.origin + L.url('admin/services/mqtt-metrics');
-		o = s.option(form.Flag, 'cleanup_legacy', _('Remove legacy leftovers'),
-			_('On the first start with discovery on, adopt the legacy script\'s topics and remove the entities that can never have a value (for example IPv4 on a DHCPv6 interface).'));
-		o.default = '1';
-		o.rmempty = false;
-
 		// The map renders its contents again after every save, which removes
 		// anything added to it by hand. The banner (and the baseline it compares
 		// with) is put back each time.

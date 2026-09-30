@@ -16,13 +16,12 @@ return view.extend({
 	load: function() {
 		return Promise.all([
 			L.resolveDefault(mm.callCatalog(), null),
-			L.resolveDefault(mm.callLegacy(), null),
 			uci.load('mqtt-metrics')
 		]);
 	},
 
 	render: function(data) {
-		var self = this, catalog = data[0] || {}, legacy = data[1] || {};
+		var self = this, catalog = data[0] || {};
 		// The catalog is the only source of the password state and of TLS
 		// support; when the call failed the page must not pretend to know.
 		var unknown = !data[0];
@@ -80,7 +79,7 @@ return view.extend({
 		o.value('0', '0');
 		o.value('1', '1');
 		o.default = '1';
-		o = s.option(form.Flag, 'retain', _('Retain states'), _('The legacy script retained every state.'));
+		o = s.option(form.Flag, 'retain', _('Retain states'), _('The broker keeps the last state, so Home Assistant shows it after a restart.'));
 		o.default = '1';
 		o.rmempty = false;
 		o = s.option(form.Flag, 'tls', _('Use TLS'),
@@ -129,33 +128,6 @@ return view.extend({
 				ui.addNotification(null, E('p', {}, [ mm.text(_('Connection failed') + ': ' + mm.errorText(err)) ]), 'danger');
 			});
 		};
-
-		if (legacy.importable) {
-			s = m.section(form.NamedSection, 'broker', 'broker', _('Legacy script'),
-				_('The legacy publish_metrics.sh script is installed on this router. Its broker address, user and password can be copied here; the password is copied on the router and not shown.'));
-			o = s.option(form.DummyValue, '_legacy_host', _('Legacy broker'));
-			o.cfgvalue = function() { return (legacy.broker_host || '-') + (legacy.broker_username ? ' (' + legacy.broker_username + ')' : ''); };
-			o = s.option(form.Button, '_import', _('Import'));
-			o.inputtitle = _('Import broker settings');
-			o.inputstyle = 'apply';
-			o.onclick = function() {
-				return mm.callImportLegacy().then(function(res) {
-					if (!res.ok) {
-						ui.addNotification(null, E('p', {}, [ mm.text(_('Import failed') + ': ' + res.error) ]), 'danger');
-						return;
-					}
-					ui.addNotification(null, E('p', {}, [ mm.text(_('Broker settings imported. Reloading the page.')) ]), 'info');
-					window.setTimeout(function() { window.location.reload(); }, 1500);
-				}).catch(function(err) {
-					ui.addNotification(null, E('p', {}, [ mm.text(_('Import failed') + ': ' + mm.errorText(err)) ]), 'danger');
-				});
-			};
-		}
-
-		if (legacy.script && !legacy.importable && legacy.import_error) {
-			s = m.section(form.NamedSection, 'broker', 'broker', _('Legacy script'),
-				_('The legacy publish_metrics.sh script is installed, but its broker settings cannot be imported:') + ' ' + legacy.import_error);
-		}
 
 		// A browser that saved the router's own login could fill it into the
 		// broker's user name and password, and Save would store the router

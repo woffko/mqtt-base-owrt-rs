@@ -89,7 +89,7 @@ return view.extend({
 		var self = this, d = this.catalog.defaults || {};
 		return E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, [ mm.text(_('Publishing')) ]),
-			E('div', { 'class': 'cbi-section-descr' }, [ mm.text(_('The legacy script published every value every 300 s. Intervals of groups and single metrics override the global interval.')) ]),
+			E('div', { 'class': 'cbi-section-descr' }, [ mm.text(_('Every metric is published at its interval. Intervals of groups and single metrics override the global interval.')) ]),
 			E('div', { 'class': 'cbi-value' }, [
 				E('label', { 'class': 'cbi-value-title' }, [ mm.text(_('Global interval (s)')) ]),
 				E('div', { 'class': 'cbi-value-field' }, [
@@ -111,8 +111,8 @@ return view.extend({
 		]);
 	},
 
-	legacyInterfaces: function() {
-		return (this.catalog.interfaces || []).filter(function(i) { return i.legacy_wan; }).map(function(i) { return i.name; });
+	autoInterfaces: function() {
+		return (this.catalog.interfaces || []).filter(function(i) { return i.auto_wan; }).map(function(i) { return i.name; });
 	},
 
 	renderChoiceList: function(items, selected, disabled) {
@@ -132,7 +132,7 @@ return view.extend({
 	renderSelection: function() {
 		var self = this, c = this.catalog;
 		var ifaceItems = (c.interfaces || []).map(function(i) {
-			return { name: i.name, label: i.name + (i.proto ? ' (' + i.proto + ')' : '') + (i.legacy_wan ? ' *' : '') };
+			return { name: i.name, label: i.name + (i.proto ? ' (' + i.proto + ')' : '') + (i.auto_wan ? ' *' : '') };
 		});
 		var ifaceBox = E('div');
 		var drawIfaces = function() {
@@ -140,14 +140,14 @@ return view.extend({
 		};
 		drawIfaces();
 		var mode = E('select', { 'class': 'cbi-input-select', 'style': 'width:auto;max-width:100%' }, [
-			E('option', { 'value': 'auto' }, [ mm.text(_('Automatic: WAN interfaces (wan*, wwan*), like the legacy script')) ]),
+			E('option', { 'value': 'auto' }, [ mm.text(_('Automatic: WAN interfaces (wan*, wwan*)')) ]),
 			E('option', { 'value': 'manual' }, [ mm.text(_('Manual selection')) ])
 		]);
 		mode.value = this.select.mode;
 		mode.addEventListener('change', function() {
 			self.select.mode = mode.value;
 			if (mode.value === 'auto')
-				self.select.interfaces = self.legacyInterfaces();
+				self.select.interfaces = self.autoInterfaces();
 			drawIfaces();
 		});
 
@@ -155,7 +155,7 @@ return view.extend({
 		var serviceItems = (c.services || []).map(function(s) { return { name: s, label: s }; });
 		return E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, [ mm.text(_('Selection')) ]),
-			E('div', { 'class': 'cbi-section-descr' }, [ mm.text(_('Metrics of newly selected instances appear after Save & Apply. * marks interfaces matched by the legacy WAN rule, which keep the legacy entity ids.')) ]),
+			E('div', { 'class': 'cbi-section-descr' }, [ mm.text(_('Metrics of newly selected instances appear after Save & Apply. * marks interfaces that the automatic selection takes; their entity ids start with wan_, those of other interfaces with iface_.')) ]),
 			E('div', { 'class': 'cbi-value' }, [
 				E('label', { 'class': 'cbi-value-title' }, [ mm.text(_('Interfaces')) ]),
 				E('div', { 'class': 'cbi-value-field' }, [ mode, ifaceBox ])
@@ -228,7 +228,7 @@ return view.extend({
 			E('td', { 'class': 'td', 'data-title': _('HA') }, [ checkbox(d.discovery, function(v) { d.discovery = v; }, _('Show in Home Assistant')) ]),
 			E('td', { 'class': 'td', 'data-title': _('Name') }, [
 				input(d.name, def.name, function(v) { d.name = v; }),
-				m.legacy ? E('small', { 'style': 'opacity:.7' }, [ mm.text(_('legacy')) ]) : (m.recommended ? E('small', { 'style': 'opacity:.7' }, [ mm.text(_('recommended')) ]) : '')
+				m.default_publish ? E('small', { 'style': 'opacity:.7' }, [ mm.text(_('default')) ]) : (m.recommended ? E('small', { 'style': 'opacity:.7' }, [ mm.text(_('recommended')) ]) : '')
 			]),
 			E('td', { 'class': 'td', 'data-title': _('Value'), 'style': 'word-break:break-all' }, [ value ]),
 			E('td', { 'class': 'td', 'data-title': _('Interval (s)') }, [ input(d.interval, String(m.interval), function(v) { d.interval = v; }, '6em') ]),
@@ -332,15 +332,15 @@ return view.extend({
 					self.redrawGroups();
 					ui.addNotification(null, E('p', {}, [ mm.text(_('Recommended metrics are selected. Save & Apply to publish them.')) ]), 'info');
 				}),
-				button(_('Reset to legacy defaults'), 'negative', function() {
+				button(_('Reset to defaults'), 'negative', function() {
 					if (!window.confirm(_('Remove every per-metric override and group setting, restore the 300 s interval and the automatic interface selection?')))
 						return;
-					self.desired = mm.legacyDefaults(self.metrics);
+					self.desired = mm.defaultSettings(self.metrics);
 					Object.keys(self.groups).forEach(function(g) { self.groups[g] = { enabled: true, interval: '' }; });
 					self.publish = { interval: '300', change_only: false, max_age: '3600' };
-					self.select = { mode: 'auto', interfaces: self.legacyInterfaces(), devices: [], services: [] };
+					self.select = { mode: 'auto', interfaces: self.autoInterfaces(), devices: [], services: [] };
 					self.resetRequested = true;
-					ui.addNotification(null, E('p', {}, [ mm.text(_('Legacy defaults restored in the form. Save & Apply to use them.')) ]), 'info');
+					ui.addNotification(null, E('p', {}, [ mm.text(_('Defaults restored in the form. Save & Apply to use them.')) ]), 'info');
 					self.drawSections();
 					self.redrawGroups();
 				})

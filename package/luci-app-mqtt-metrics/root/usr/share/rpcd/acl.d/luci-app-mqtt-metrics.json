@@ -3,13 +3,13 @@
 		"description": "Grant access to MQTT Metrics",
 		"read": {
 			"ubus": {
-				"mqtt-metrics": [ "status", "catalog", "preview", "legacy", "log" ]
+				"mqtt-metrics": [ "status", "catalog", "preview", "log" ]
 			},
 			"uci": [ "mqtt-metrics" ]
 		},
 		"write": {
 			"ubus": {
-				"mqtt-metrics": [ "test_connection", "set_password", "import_legacy", "republish", "purge", "reload" ]
+				"mqtt-metrics": [ "test_connection", "set_password", "republish", "purge", "reload" ]
 			},
 			"uci": [ "mqtt-metrics" ]
 		}
