@@ -88,8 +88,8 @@ it):
   `SSHPASS` environment variable.
 - The broker settings are in `/etc/config/mqtt-metrics` on the routers, the
   password in `/etc/mqtt-metrics/secret` (ADR-0004). Read the password only on
-  the router, never print it, and never put it on a command line: for a
-  check with `mosquitto_sub` pass it through a temporary 0600 options file.
+  the router, never print it, and never put it on a command line:
+  `tools/retained.sh <router>` lists the retained topics that way.
 - Read-only inspection is the default. Installing and removing this project's
   packages on both routers is authorized as part of the Goal. Changes to
   `/etc/rc.local`, `/etc/crontabs/root`, and deleting files that do not
