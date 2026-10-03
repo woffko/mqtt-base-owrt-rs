@@ -11,8 +11,6 @@ function formValue(map, section, option) {
 }
 
 return view.extend({
-	pendingPassword: null,
-
 	load: function() {
 		return Promise.all([
 			L.resolveDefault(mm.callCatalog(), null),
@@ -21,16 +19,16 @@ return view.extend({
 	},
 
 	render: function(data) {
-		var self = this, catalog = data[0] || {};
-		// The catalog is the only source of the password state and of TLS
-		// support; when the call failed the page must not pretend to know.
+		var catalog = data[0] || {};
+		// The catalog says whether this build supports TLS; when the call
+		// failed the page must not pretend to know.
 		var unknown = !data[0];
 		var identity = catalog.identity || {};
 		var m, s, o;
 
 		m = new form.Map('mqtt-metrics', _('MQTT Metrics: Broker'),
-			_('Connection to the MQTT broker. The password is stored outside UCI in a root-only file and is never sent back to the browser.') +
-			(unknown ? ' ' + _('The service did not answer, so what this page shows about the stored password and about TLS support may be wrong.') : ''));
+			_('Connection to the MQTT broker.') +
+			(unknown ? ' ' + _('The service did not answer, so what this page shows about TLS support may be wrong.') : ''));
 
 		s = m.section(form.NamedSection, 'main', 'main', _('Service'));
 		o = s.option(form.Flag, 'enabled', _('Enabled'));
@@ -50,23 +48,8 @@ return view.extend({
 		o.datatype = 'and(uinteger,range(1,65535))';
 		o.placeholder = '1883';
 		o = s.option(form.Value, 'username', _('User name'));
-		o = s.option(form.Value, '_password', _('Password'),
-			unknown ? _('The state of the stored password is unknown.') :
-			catalog.password_set ? _('A password is stored. Leave empty to keep it.') : _('No password is stored.'));
+		o = s.option(form.Value, 'password', _('Password'));
 		o.password = true;
-		o.placeholder = catalog.password_set ? _('(unchanged)') : '';
-		o.cfgvalue = function() { return null; };
-		o.write = function(section_id, value) { self.pendingPassword = value; };
-		o.remove = function() {};
-		if (catalog.password_set) {
-			o = s.option(form.Flag, '_clear_password', _('Remove stored password'));
-			o.cfgvalue = function() { return '0'; };
-			o.write = function(section_id, value) {
-				if (value === '1')
-					self.pendingPassword = '';
-			};
-			o.remove = function() {};
-		}
 		o = s.option(form.Value, 'client_id', _('Client ID'), _('Must be unique on the broker. Default: mqtt-metrics-&lt;hostname&gt;.'));
 		o.placeholder = identity.client_id || '';
 		o.validate = function(section_id, value) {
@@ -107,17 +90,15 @@ return view.extend({
 		};
 
 		o = s.option(form.Button, '_test', _('Connection test'),
-			_('Connects with the address, user, password and TLS switches shown above, including unsaved changes, then disconnects. Nothing is published. The stored password is used only for the saved address; type it to test another one. Certificate files are taken from the saved configuration.'));
+			_('Connects with the address, user, password and TLS switches shown above, including unsaved changes, then disconnects. Nothing is published. Certificate files are taken from the saved configuration.'));
 		o.inputtitle = _('Test connection');
 		o.inputstyle = 'action';
 		o.onclick = function() {
-			var typed = formValue(m, 'broker', '_password') || '';
 			var args = [
 				formValue(m, 'broker', 'host') || '',
 				+(formValue(m, 'broker', 'port') || 1883),
 				formValue(m, 'broker', 'username') || '',
-				typed,
-				typed === '',
+				formValue(m, 'broker', 'password') || '',
 				formValue(m, 'broker', 'tls') === '1',
 				formValue(m, 'broker', 'tls_verify') !== '0'
 			];
@@ -146,26 +127,6 @@ return view.extend({
 			});
 		};
 
-		this.map = m;
 		return m.render();
-	},
-
-	handleSave: function(ev) {
-		var self = this;
-		self.pendingPassword = null;
-		return this.map.save().then(function() {
-			if (self.pendingPassword == null)
-				return;
-			var password = self.pendingPassword;
-			self.pendingPassword = null;
-			return mm.callSetPassword(password).then(function(res) {
-				if (!res.ok)
-					ui.addNotification(null, E('p', {}, [ mm.text(_('Password not saved') + ': ' + res.error) ]), 'danger');
-				else
-					ui.addNotification(null, E('p', {}, [ mm.text(res.password_set ? _('Password saved.') : _('Password removed.')) ]), 'info');
-			}).catch(function(err) {
-				ui.addNotification(null, E('p', {}, [ mm.text(_('Password not saved') + ': ' + mm.errorText(err)) ]), 'danger');
-			});
-		});
 	}
 });

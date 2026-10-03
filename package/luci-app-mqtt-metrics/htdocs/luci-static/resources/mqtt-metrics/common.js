@@ -16,10 +16,9 @@ var callLog = rpc.declare({ object: 'mqtt-metrics', method: 'log', reject: true 
 var callTest = rpc.declare({
 	object: 'mqtt-metrics',
 	method: 'test_connection',
-	params: [ 'host', 'port', 'username', 'password', 'keep_password', 'tls', 'tls_verify' ],
+	params: [ 'host', 'port', 'username', 'password', 'tls', 'tls_verify' ],
 	reject: true
 });
-var callSetPassword = rpc.declare({ object: 'mqtt-metrics', method: 'set_password', params: [ 'password' ], reject: true });
 var callRepublish = rpc.declare({ object: 'mqtt-metrics', method: 'republish', reject: true });
 var callPurge = rpc.declare({ object: 'mqtt-metrics', method: 'purge', reject: true });
 var callReload = rpc.declare({ object: 'mqtt-metrics', method: 'reload', reject: true });
@@ -228,7 +227,6 @@ return baseclass.extend({
 	callPreview: callPreview,
 	callLog: callLog,
 	callTest: callTest,
-	callSetPassword: callSetPassword,
 	callRepublish: callRepublish,
 	callPurge: callPurge,
 	callReload: callReload,

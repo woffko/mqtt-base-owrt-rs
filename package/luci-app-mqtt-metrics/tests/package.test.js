@@ -16,14 +16,14 @@ const menu = JSON.parse(fs.readFileSync(path.join(root, 'root/usr/share/luci/men
 const rpcdSource = fs.readFileSync(path.join(repo, 'package/mqtt-metrics/src/src/rpcd.rs'), 'utf8');
 const methodsBlock = rpcdSource.slice(rpcdSource.indexOf('pub fn methods()'), rpcdSource.indexOf('pub fn call('));
 const methods = [ ...methodsBlock.matchAll(/^\s*"([a-z_]+)": \{/gm) ].map((m) => m[1]);
-assert.ok(methods.length >= 9, 'parsed rpcd methods: ' + methods);
+assert.ok(methods.length >= 8, 'parsed rpcd methods: ' + methods);
 
 const read = acl.read.ubus['mqtt-metrics'];
 const write = acl.write.ubus['mqtt-metrics'];
 assert.deepEqual(read.slice().sort(), [ 'catalog', 'log', 'preview', 'status' ]);
 assert.deepEqual([ ...read, ...write ].sort(), methods.slice().sort(), 'every rpcd method is in exactly one ACL list');
 assert.equal(read.filter((m) => write.includes(m)).length, 0);
-for (const m of [ 'set_password', 'purge', 'republish', 'reload', 'test_connection' ])
+for (const m of [ 'purge', 'republish', 'reload', 'test_connection' ])
 	assert.ok(write.includes(m), m + ' must require write access');
 assert.deepEqual(acl.read.uci, [ 'mqtt-metrics' ]);
 assert.deepEqual(acl.write.uci, [ 'mqtt-metrics' ]);

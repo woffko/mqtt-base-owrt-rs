@@ -9,7 +9,7 @@
 		},
 		"write": {
 			"ubus": {
-				"mqtt-metrics": [ "test_connection", "set_password", "republish", "purge", "reload" ]
+				"mqtt-metrics": [ "test_connection", "republish", "purge", "reload" ]
 			},
 			"uci": [ "mqtt-metrics" ]
 		}
