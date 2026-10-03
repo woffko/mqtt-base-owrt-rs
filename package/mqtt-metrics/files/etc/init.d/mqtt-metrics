@@ -12,7 +12,6 @@ prepare_dirs() {
 	mkdir -p /var/run/mqtt-metrics /etc/mqtt-metrics
 	chmod 0700 /var/run/mqtt-metrics /etc/mqtt-metrics
 	[ -f /etc/config/$CONFIG ] && chmod 0600 /etc/config/$CONFIG
-	[ -f /etc/mqtt-metrics/secret ] && chmod 0600 /etc/mqtt-metrics/secret
 	return 0
 }
 

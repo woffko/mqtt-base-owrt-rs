@@ -4,7 +4,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mqtt-metrics
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=8
+PKG_RELEASE:=9
 
 PKG_MAINTAINER:=woffko
 PKG_LICENSE:=GPL-2.0-or-later
@@ -36,9 +36,26 @@ endef
 
 # default_postinst enables and starts the service on a fresh install. On an
 # upgrade the running process still uses the old binary, so restart it.
+#
+# Releases before r9 kept the broker password in /etc/mqtt-metrics/secret. It
+# moves into UCI once (ADR-0008); `uci batch` reads it from stdin, so it is on
+# no command line.
 define Package/mqtt-metrics/postinst
 [ -n "$${IPKG_INSTROOT}" ] || {
-	if [ "$${PKG_UPGRADE:-0}" = 1 ]; then
+	restart=$${PKG_UPGRADE:-0}
+	s=/etc/mqtt-metrics/secret
+	if [ -s "$$s" ]; then
+		if [ -n "$$(uci -q get mqtt-metrics.broker.password)" ]; then
+			rm -f "$$s"
+		elif {
+			printf "set mqtt-metrics.broker.password='%s'\n" "$$(sed "s/'/'\\\\''/g" "$$s")"
+			echo "commit mqtt-metrics"
+		} | uci -q batch; then
+			rm -f "$$s"
+			restart=1
+		fi
+	fi
+	if [ "$$restart" = 1 ]; then
 		/etc/init.d/mqtt-metrics restart >/dev/null 2>&1 || true
 	fi
 	exit 0

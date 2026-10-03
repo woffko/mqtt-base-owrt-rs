@@ -2,8 +2,9 @@
 //! UCI configuration (`/etc/config/mqtt-metrics`).
 //!
 //! The configuration is read and validated once per (re)load. The broker
-//! password is not part of UCI: LuCI can read every UCI option, so the password lives in a
-//! root-only file ([`SECRET_PATH`]) that the browser can only overwrite.
+//! password is an ordinary option, as other OpenWrt passwords are: the file is
+//! mode 0600 and only root logs in to LuCI (ADR-0008). It is kept in a
+//! [`Secret`], which never shows its value in debug output.
 
 use std::collections::BTreeMap;
 
@@ -13,7 +14,6 @@ use crate::text::{valid_object_id, valid_topic};
 use crate::uci::{self, Package, Section};
 
 pub const CONFIG_NAME: &str = "mqtt-metrics";
-pub const SECRET_PATH: &str = "/etc/mqtt-metrics/secret";
 pub const STATE_PATH: &str = "/etc/mqtt-metrics/state.json";
 pub const RUN_DIR: &str = "/var/run/mqtt-metrics";
 
@@ -29,11 +29,32 @@ pub struct Tls {
     pub key: Option<String>,
 }
 
+/// A value that must not end up in logs, status output or error messages.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: String) -> Secret {
+        Secret(value)
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(<set>)")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Broker {
     pub host: String,
     pub port: u16,
     pub username: Option<String>,
+    pub password: Option<Secret>,
     pub client_id: Option<String>,
     pub keepalive: u16,
     pub qos: u8,
@@ -116,6 +137,7 @@ impl Default for Config {
                 host: String::new(),
                 port: 1883,
                 username: None,
+                password: None,
                 client_id: None,
                 keepalive: 60,
                 qos: 1,
@@ -316,6 +338,18 @@ pub fn from_uci_lenient(pkg: &Package) -> (Config, Vec<String>) {
         cfg.broker.port = u16::try_from(port).unwrap_or(1883);
     }
     cfg.broker.username = r.string("username");
+    // The value is never quoted in an error message.
+    cfg.broker.password = r.string("password").map(Secret::new);
+    if cfg
+        .broker
+        .password
+        .as_ref()
+        .is_some_and(|p| p.expose().len() > 1024 || p.expose().contains(['\n', '\r', '\0']))
+    {
+        r.errors
+            .push("broker.password: longer than 1024 bytes or contains a line break".to_string());
+        cfg.broker.password = None;
+    }
     cfg.broker.client_id = r.string("client_id");
     if let Some(id) = &cfg.broker.client_id {
         if !valid_object_id(id) {
@@ -484,18 +518,6 @@ pub fn from_uci_text_lenient(text: &str) -> (Config, Vec<String>) {
     from_uci_lenient(&uci::parse(CONFIG_NAME, text))
 }
 
-/// Read the password file. A missing file means "no password".
-pub fn read_secret(path: &str) -> std::io::Result<Option<String>> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => {
-            let value = text.trim_end_matches(['\n', '\r']).to_string();
-            Ok(if value.is_empty() { None } else { Some(value) })
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,6 +598,22 @@ mqtt-metrics.system_uptime.icon='mdi:timer'
         let over = &cfg.metrics["system_uptime"];
         assert_eq!(over.publish, Some(false));
         assert_eq!(over.name.as_deref(), Some("Router Uptime"));
+    }
+
+    #[test]
+    fn the_password_is_read_from_uci_and_never_shown() {
+        let text = "mqtt-metrics.broker=broker\nmqtt-metrics.broker.host='192.0.2.10'\nmqtt-metrics.broker.password='it'\\''s a s3cret'\n";
+        let cfg = from_uci_text(text).unwrap();
+        let password = cfg.broker.password.as_ref().map(Secret::expose);
+        assert_eq!(password, Some("it's a s3cret"));
+        assert!(!format!("{cfg:?}").contains("s3cret"));
+
+        let long = format!(
+            "mqtt-metrics.broker=broker\nmqtt-metrics.broker.password='{}s3cret'\n",
+            "x".repeat(1100)
+        );
+        let errors = from_uci_text(&long).unwrap_err();
+        assert!(errors.iter().all(|e| !e.contains("s3cret")), "{errors:?}");
     }
 
     #[test]

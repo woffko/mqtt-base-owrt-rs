@@ -15,14 +15,13 @@ use serde_json::{json, Map, Value};
 
 use crate::catalog::{Group, ALL};
 use crate::collect::{self, net, CollectorState};
-use crate::config::{self, Config, RUN_DIR, SECRET_PATH};
+use crate::config::{self, Config, RUN_DIR};
 use crate::control::{self, Command};
 use crate::engine::{self, Entry};
 use crate::exec;
 use crate::ha::Identity;
 use crate::mqtt::{Client, Options};
 use crate::source::{Source, SystemSource};
-use crate::state::write_atomic;
 
 macro_rules! out {
     ($($arg:tt)*) => {{
@@ -47,9 +46,8 @@ pub fn methods() -> Value {
         "log": {},
         "test_connection": {
             "host": "str", "port": 1883, "username": "str", "password": "str",
-            "keep_password": true, "tls": true, "tls_verify": true
+            "tls": true, "tls_verify": true
         },
-        "set_password": { "password": "str" },
         "republish": {},
         "purge": {},
         "reload": {}
@@ -63,7 +61,6 @@ pub fn call(method: &str, args: &Value) -> Value {
         "preview" => preview(&SystemSource, args),
         "log" => log(),
         "test_connection" => test_connection(args),
-        "set_password" => set_password(args),
         "republish" => control_command(Command::Republish),
         "purge" => control_command(Command::Purge),
         "reload" => control_command(Command::Reload),
@@ -329,7 +326,6 @@ pub fn catalog(source: &dyn Source) -> Value {
         "services": services,
         "selected_devices": cfg.select.devices,
         "selected_services": cfg.select.services,
-        "password_set": config::read_secret(SECRET_PATH).ok().flatten().is_some(),
         "tls_supported": crate::mqtt::TLS_SUPPORTED,
         "duration_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     })
@@ -385,14 +381,6 @@ fn arg_str(args: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The stored password is only presented to the broker it was saved for. A
-/// caller with write access to this app must not be able to make the router
-/// send it to another host, or to the same host without the TLS the saved
-/// configuration uses.
-fn stored_password_allowed(cfg: &Config, host: &str, port: u16, tls: bool) -> bool {
-    host == cfg.broker.host && port == cfg.broker.port && (tls || !cfg.broker.tls.enabled)
-}
-
 fn test_connection(args: &Value) -> Value {
     let (cfg, _) = load_config(&SystemSource);
     let host = arg_str(args, "host").unwrap_or_else(|| cfg.broker.host.clone());
@@ -411,24 +399,11 @@ fn test_connection(args: &Value) -> Value {
         .get("tls")
         .and_then(Value::as_bool)
         .unwrap_or(cfg.broker.tls.enabled);
-    let keep = args
-        .get("keep_password")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    let password = if keep {
-        let stored = config::read_secret(SECRET_PATH).ok().flatten();
-        if stored.is_some() && !stored_password_allowed(&cfg, &host, port, tls_on) {
-            return json!({
-                "ok": false,
-                "error": "the stored password is only used for the saved broker address; type the password to test another address",
-            });
-        }
-        stored
-    } else {
-        args.get("password")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
+    // The password from the form, empty for none; without the argument (the
+    // Status page) the saved one.
+    let password = match args.get("password") {
+        Some(p) => p.as_str().filter(|s| !s.is_empty()).map(str::to_string),
+        None => cfg.broker.password.as_ref().map(|p| p.expose().to_string()),
     };
     let tls = tls_on.then(|| {
         let mut broker = cfg.broker.clone();
@@ -462,44 +437,6 @@ fn test_connection(args: &Value) -> Value {
             })
         }
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
-    }
-}
-
-fn reload_daemon() -> Option<String> {
-    match control::send(&control_path(), Command::Reload, Duration::from_secs(10)) {
-        Ok((true, _)) => None,
-        Ok((false, msg)) => Some(msg),
-        Err(e) => Some(format!("the service is not running ({e})")),
-    }
-}
-
-fn set_password(args: &Value) -> Value {
-    // A missing or non-string password (or input that did not parse) must not
-    // be read as "remove the stored password".
-    let Some(password) = args.get("password").and_then(Value::as_str) else {
-        return json!({
-            "ok": false,
-            "error": "password must be a string; an empty string removes the stored one",
-        });
-    };
-    if password.len() > 1024 || password.contains(['\n', '\r', '\0']) {
-        return json!({ "ok": false, "error": "invalid password" });
-    }
-    let path = Path::new(SECRET_PATH);
-    let result = if password.is_empty() {
-        match std::fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        }
-    } else {
-        write_atomic(path, password.as_bytes(), 0o600)
-    };
-    match result {
-        Ok(()) => {
-            json!({ "ok": true, "password_set": !password.is_empty(), "reload_warning": reload_daemon() })
-        }
-        Err(e) => json!({ "ok": false, "error": format!("{SECRET_PATH}: {e}") }),
     }
 }
 
@@ -541,18 +478,6 @@ mod tests {
         }
         fn now(&self) -> u64 {
             self.inner.now()
-        }
-    }
-
-    #[test]
-    fn a_missing_or_wrong_password_argument_is_an_error() {
-        for args in [
-            json!({}),
-            json!({ "password": 12345 }),
-            json!({ "password": null }),
-        ] {
-            let reply = set_password(&args);
-            assert_eq!(reply["ok"], false, "{args}: {reply}");
         }
     }
 
@@ -645,30 +570,5 @@ mod tests {
     #[test]
     fn method_list_is_an_object() {
         assert!(methods().as_object().unwrap().contains_key("catalog"));
-    }
-
-    #[test]
-    fn the_stored_password_stays_with_its_broker() {
-        let mut cfg = Config::default();
-        cfg.broker.host = "broker.example".into();
-        cfg.broker.port = 1883;
-        assert!(stored_password_allowed(&cfg, "broker.example", 1883, false));
-        assert!(stored_password_allowed(&cfg, "broker.example", 1883, true));
-        assert!(!stored_password_allowed(&cfg, "other.example", 1883, false));
-        assert!(!stored_password_allowed(
-            &cfg,
-            "broker.example",
-            8883,
-            false
-        ));
-        cfg.broker.tls.enabled = true;
-        // Downgrading a TLS connection would send the password in the clear.
-        assert!(!stored_password_allowed(
-            &cfg,
-            "broker.example",
-            1883,
-            false
-        ));
-        assert!(stored_password_allowed(&cfg, "broker.example", 1883, true));
     }
 }

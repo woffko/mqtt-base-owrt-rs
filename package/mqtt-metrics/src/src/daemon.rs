@@ -5,9 +5,7 @@
 //! connection with bounded reconnect backoff, and the publish engine. Every
 //! blocking call has a timeout so the loop keeps turning.
 
-use std::collections::hash_map::DefaultHasher;
 use std::fs::{File, OpenOptions, TryLockError};
-use std::hash::{Hash, Hasher};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::collect;
-use crate::config::{self, Config, RUN_DIR, SECRET_PATH, STATE_PATH};
+use crate::config::{self, Config, RUN_DIR, STATE_PATH};
 use crate::control::{self, Command};
 use crate::engine::{Engine, Publication};
 use crate::log::{Level, Log};
@@ -201,15 +199,9 @@ impl Signals {
     }
 }
 
-fn password_hash(password: Option<&str>) -> u64 {
-    let mut h = DefaultHasher::new();
-    password.hash(&mut h);
-    h.finish()
-}
-
 struct Session {
     client: Client,
-    password_hash: u64,
+    /// Broker settings of this session, the password included.
     broker: config::Broker,
     /// Last Will topic registered with the broker for this session.
     availability_topic: String,
@@ -309,15 +301,11 @@ impl Daemon {
     /// changed.
     fn reload(&mut self) {
         self.load();
-        let secret = config::read_secret(SECRET_PATH).ok().flatten();
         let identity = self.engine.as_ref().map(|e| e.identity().clone());
         let (reconnect, farewell) = match (&self.config, &self.session, &identity) {
             (Ok(cfg), Some(s), Some(id)) => {
                 let moved = id.availability_topic != s.availability_topic;
-                let changed = cfg.broker != s.broker
-                    || password_hash(secret.as_deref()) != s.password_hash
-                    || id.client_id != s.client_id
-                    || moved;
+                let changed = cfg.broker != s.broker || id.client_id != s.client_id || moved;
                 (
                     changed,
                     if moved {
@@ -351,20 +339,13 @@ impl Daemon {
             return;
         };
         let id = engine.identity().clone();
-        let password = match config::read_secret(SECRET_PATH) {
-            Ok(p) => p,
-            Err(e) => {
-                self.log.warn(&format!("{SECRET_PATH}: {e}"));
-                None
-            }
-        };
         let opts = Options {
             host: cfg.broker.host.clone(),
             port: cfg.broker.port,
             client_id: id.client_id.clone(),
             keepalive: cfg.broker.keepalive,
             username: cfg.broker.username.clone(),
-            password: password.clone(),
+            password: cfg.broker.password.as_ref().map(|p| p.expose().to_string()),
             will: Some(WillMessage {
                 topic: id.availability_topic.clone(),
                 payload: "offline".to_string(),
@@ -393,7 +374,6 @@ impl Daemon {
                         ));
                         self.session = Some(Session {
                             client,
-                            password_hash: password_hash(password.as_deref()),
                             broker: cfg.broker.clone(),
                             availability_topic: id.availability_topic.clone(),
                             client_id: id.client_id.clone(),
@@ -912,7 +892,7 @@ pub fn purge_once() -> i32 {
         client_id: format!("{}-purge", id.client_id),
         keepalive: 30,
         username: cfg.broker.username.clone(),
-        password: config::read_secret(SECRET_PATH).ok().flatten(),
+        password: cfg.broker.password.as_ref().map(|p| p.expose().to_string()),
         will: None,
         connect_timeout: CONNECT_TIMEOUT,
         tls: cfg.broker.tls_settings(),
