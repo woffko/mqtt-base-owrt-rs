@@ -28,7 +28,7 @@ The page refreshes every 5 seconds.
 | Enabled | Off stops the service. |
 | Log level | Errors, warnings, information (default) or debug. The service logs to syslog as `mqtt-metrics`. |
 | Host, Port | Broker address; the port defaults to 1883. |
-| User name, Password | The password is stored in `/etc/mqtt-metrics/secret` (root only) and is never shown again. Leave the field empty to keep the stored password; tick **Remove stored password** to delete it. |
+| User name, Password | Stored in `/etc/config/mqtt-metrics` (mode 0600), like other OpenWrt passwords. The field shows the password concealed; the button next to it reveals it. |
 | Client ID | Must be unique on the broker. Default `mqtt-metrics-<hostname>`. |
 | Keepalive | Seconds between keepalive packets, 5-3600 (default 60). |
 | QoS for states, Retain states | Defaults 1 and on. Discovery always uses QoS 1 and retain. Turning retain off clears the retained states once. |
@@ -161,9 +161,9 @@ showing the stored settings that could be read.
 | Path | Content |
 | --- | --- |
 | `/etc/config/mqtt-metrics` | configuration (mode 0600) |
-| `/etc/mqtt-metrics/secret` | broker password (mode 0600) |
 | `/etc/mqtt-metrics/state.json` | retained topics owned on the broker; written only when that set changes |
 | `/var/run/mqtt-metrics/status.json` | runtime status (tmpfs) |
 | `/var/run/mqtt-metrics/control.sock` | local control socket for LuCI (root only) |
 
-`/etc/mqtt-metrics/secret` and `state.json` are kept across sysupgrade.
+`/etc/config/mqtt-metrics` and `/etc/mqtt-metrics/state.json` are kept
+across sysupgrade.

@@ -25,7 +25,6 @@ const ORIGIN = 'http://luci.test';
 const catalog = {
 	config_errors: [],
 	identity: { hostname: 'r1', base_topic: 'openwrt/r1', device_id: 'openwrt_r1', client_id: 'mqtt-metrics-r1' },
-	password_set: true,
 	tls_supported: true,
 	defaults: { interval: 60, min_interval: 5, max_interval: 86400 },
 	groups: [],
@@ -60,7 +59,7 @@ function defaultUci() {
 async function start(opts) {
 	const view = opts.view;
 	const state = {
-		uci: { 'mqtt-metrics': defaultUci(), luci: {}, system: {} },
+		uci: { 'mqtt-metrics': Object.assign(defaultUci(), opts.uci || {}), luci: {}, system: {} },
 		uciWrites: [],
 		errors: [],
 		handlers: opts.handlers || {}
@@ -237,14 +236,19 @@ const scenarios = {
 
 	// Validators of the real form code, a failing call, the password field.
 	async broker() {
-		const h = await start({ view: 'mqtt-metrics/broker', handlers: {
+		let testArgs = null;
+		const broker = Object.assign(defaultUci().broker, { host: '192.0.2.10', username: 'u', password: 'dummy-pass' });
+		const h = await start({ view: 'mqtt-metrics/broker', uci: { broker }, handlers: {
 			'mqtt-metrics.catalog': () => [ 0, catalog ],
-			'mqtt-metrics.test_connection': () => [ 6 ]
+			'mqtt-metrics.test_connection': (args) => { testArgs = args; return [ 6 ]; }
 		} });
 		try {
 			const { page } = h;
+			// The password is an ordinary UCI option, shown concealed.
+			assert.equal(await page.inputValue(field('password') + ' input'), 'dummy-pass');
+			assert.match(await page.getAttribute(field('password') + ' input', 'class'), /cbi-input-password/);
 			// A browser must not fill the router login into the broker credentials.
-			assert.equal(await page.getAttribute(field('_password') + ' input', 'autocomplete'), 'new-password');
+			assert.equal(await page.getAttribute(field('password') + ' input', 'autocomplete'), 'new-password');
 			assert.equal(await page.getAttribute(field('username') + ' input', 'autocomplete'), 'off');
 
 			// The daemon refuses port 0 and a keepalive with a fraction.
@@ -262,13 +266,27 @@ const scenarios = {
 			const text = (await alerts(page)).join(' | ');
 			assert.match(text, /Connection failed: RPC call to mqtt-metrics\/test_connection failed with ubus code 6/, text);
 			assert.doesNotMatch(text, /handleCallReply/, 'no stack in the message');
+			// The test sends what the form shows, the password included.
+			assert.equal(testArgs && testArgs.password, 'dummy-pass');
+			assert.equal(testArgs && 'keep_password' in testArgs, false);
+
+			// A changed password is saved with the other settings (the
+			// validator checks above left invalid values behind).
+			await typeInto(page, field('port') + ' input', '1883');
+			await typeInto(page, field('keepalive') + ' input', '60');
+			await typeInto(page, field('password') + ' input', 'new-pass');
+			await page.click('button.cbi-button-save');
+			await page.waitForTimeout(800);
+			assert.ok(h.state.uciWrites.some((w) => w.args.values && w.args.values.password === 'new-pass'),
+				'password written to UCI: ' + JSON.stringify(h.state.uciWrites));
+			assert.ok(!h.state.uciWrites.some((w) => w.method === 'set' && w.args.values && 'password' in w.args.values && w.args.values.password !== 'new-pass'));
 			assert.deepEqual(h.state.errors, []);
 		} finally {
 			await h.browser.close();
 		}
 	},
 
-	// The catalog is the only source of TLS support and of the password state.
+	// The catalog is the only source of TLS support.
 	async broker_without_the_service() {
 		const h = await start({ view: 'mqtt-metrics/broker', handlers: {
 			'mqtt-metrics.catalog': () => [ 7 ]
@@ -277,8 +295,6 @@ const scenarios = {
 			const { page } = h;
 			const descr = await page.$eval('.cbi-map-descr', (e) => e.textContent);
 			assert.match(descr, /did not answer/);
-			const password = await page.$eval(field('_password'), (e) => e.textContent);
-			assert.match(password, /unknown/);
 			const tls = await page.$eval(field('tls'), (e) => e.textContent);
 			assert.doesNotMatch(tls, /no TLS support/);
 			await page.click(field('tls') + ' input[type="checkbox"]');

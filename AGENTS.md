@@ -41,8 +41,11 @@ it):
 ## Hard invariants
 
 - No secret (MQTT password, TLS key, router password) may appear in the
-  repository, argv, logs, `ubus` replies, LuCI page source, test fixtures, or
-  delegated prompts. Fixtures captured from routers must be sanitized
+  repository, argv, logs, the daemon's status output (`status.json`, the rpcd
+  `status`, `catalog` and `preview` replies), test fixtures, or delegated
+  prompts. The broker password is a UCI option in a mode 0600 file, like
+  other OpenWrt passwords, and LuCI shows it in a password field; only root
+  logs in to LuCI (ADR-0008). Fixtures captured from routers must be sanitized
   (TEST-NET addresses, documentation IPv6 prefix `2001:db8::/32`, fake
   hostnames).
 - Package scripts must not edit `/etc/rc.local`, crontabs, or other packages'
@@ -86,9 +89,9 @@ it):
 - The owner supplies the router password in chat. Never write it to files,
   memory, Git, logs, or delegated prompts; use `sshpass -e` with the
   `SSHPASS` environment variable.
-- The broker settings are in `/etc/config/mqtt-metrics` on the routers, the
-  password in `/etc/mqtt-metrics/secret` (ADR-0004). Read the password only on
-  the router, never print it, and never put it on a command line:
+- The broker settings, the password included, are in
+  `/etc/config/mqtt-metrics` on the routers. Read the password only on the
+  router, never print it, and never put it on a command line:
   `tools/retained.sh <router>` lists the retained topics that way.
 - Read-only inspection is the default. Installing and removing this project's
   packages on both routers is authorized as part of the Goal. Changes to

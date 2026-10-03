@@ -3,9 +3,10 @@
 # topics under the base topic and the router's discovery configs.
 #
 # It runs mosquitto_sub on the router with the broker settings of
-# /etc/config/mqtt-metrics. The password is read from
-# /etc/mqtt-metrics/secret into a temporary options file (mode 0600) that
-# mosquitto_sub reads; it never appears on a command line or in the output.
+# /etc/config/mqtt-metrics. mosquitto_sub only takes a password as an
+# argument, which every process on the router can read in /proc; the password
+# goes into a temporary options file (mode 0600) instead and never appears on
+# a command line or in the output.
 #
 # Usage: SSHPASS=... tools/retained.sh <router> [<wait-seconds>]
 set -eu
@@ -34,7 +35,8 @@ umask 077
 	user=$(uci -q get mqtt-metrics.broker.username || true)
 	[ -z "$user" ] || echo "-u $user"
 	# printf is an ash builtin: the password is not on any command line.
-	[ ! -s /etc/mqtt-metrics/secret ] || printf -- '-P %s\n' "$(cat /etc/mqtt-metrics/secret)"
+	pw=$(uci -q get mqtt-metrics.broker.password || true)
+	[ -z "$pw" ] || printf -- '-P %s\n' "$pw"
 } > "$d/mosquitto_sub"
 sub() { XDG_CONFIG_HOME=$d timeout $((WAIT + 6)) mosquitto_sub -v -W "$WAIT" -t "$1" 2>/dev/null || true; }
 {

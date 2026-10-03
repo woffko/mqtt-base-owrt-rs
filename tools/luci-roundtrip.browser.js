@@ -3,11 +3,10 @@
 // through the browser, Save & Apply, then print `uci show mqtt-metrics`
 // taken over SSH so the caller can compare. A second pass runs "Reset to
 // defaults". Every response body the browser receives is written to
-// <out>/responses.txt so the caller can check on the router that the broker
-// password never reaches the browser.
+// <out>/responses-<phase>.txt.
 //
 // Writes are limited to the mqtt-metrics UCI config and the rpcd methods
-// reload/republish; set_password and purge are blocked.
+// reload/republish; purge is blocked.
 //
 // It changes the router's configuration: the edit phase sets the keepalive,
 // QoS, device name and model, publish interval, a hidden metric and a
@@ -73,7 +72,7 @@ async function row(page, key) {
 			const [ , object, method, args ] = packet.params;
 			const foreignUci = object === 'uci' && args && args.config && args.config !== 'mqtt-metrics' &&
 				[ 'set', 'add', 'delete', 'commit' ].includes(method);
-			const blockedRpc = object === 'mqtt-metrics' && [ 'set_password', 'purge' ].includes(method);
+			const blockedRpc = object === 'mqtt-metrics' && [ 'purge' ].includes(method);
 			if (foreignUci || blockedRpc) {
 				report.blocked.push({ object, method });
 				return route.abort('blockedbyclient');

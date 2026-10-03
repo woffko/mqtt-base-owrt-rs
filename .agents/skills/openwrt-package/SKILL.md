@@ -63,8 +63,9 @@ feeds.conf.example          src-git or src-link line for this feed
   network and ubus), `procd_set_param respawn`, stdout/stderr to syslog, and
   `procd_add_reload_trigger "<uci-config>"` so UCI commits reload the daemon.
 - Configuration lives in `/etc/config/<name>` (UCI). Secrets stored in UCI
-  must be in a file with mode 0600 and must never appear in argv, logs,
-  `ubus` replies, LuCI page source, or crash output.
+  must be in a file with mode 0600 and must never appear in argv, logs, the
+  daemon's own status replies, or crash output. LuCI shows them in password
+  fields, as it does for other OpenWrt passwords (root-only sessions).
 - LuCI talks to the daemon through an rpcd plugin: either an executable in
   `/usr/libexec/rpcd/<object>` implementing `list` and `call <method>` (JSON on
   stdin/stdout), or a ucode plugin in `/usr/share/rpcd/ucode/`. Every method

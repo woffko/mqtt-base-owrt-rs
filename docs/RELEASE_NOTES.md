@@ -30,8 +30,8 @@ First version of `mqtt-metrics` and `luci-app-mqtt-metrics` for OpenWrt 25.12.
 - Retained topics owned by the router are tracked, so hidden metrics,
   deselected instances and renamed ids are removed from the broker and from
   Home Assistant automatically.
-- The password lives in `/etc/mqtt-metrics/secret` (0600), outside UCI, and
-  never appears in argv, logs, status files or rpcd replies.
+- The broker password is a UCI option (the file is mode 0600) and never
+  appears in argv, logs, the status file or the service's rpcd replies.
 
 ### LuCI
 
@@ -74,8 +74,7 @@ Details and evidence: `docs/evidence/audit-2026-09-29.md`.
   stable minute or a configuration change.
 - A second `mqtt-metricsd` is refused; `--purge` goes through a running
   service.
-- Test connection sends the stored password only to the saved broker and
-  honours the TLS switches.
+- Test connection honours the TLS switches.
 - LuCI: Reset to defaults redraws every section; CPU and rate rows show the
   last value.
 
@@ -96,8 +95,6 @@ Found by the independent review of the same commit:
   error (it used to show defaults, and Save deleted every override); the
   Broker and Metrics forms reject the values the daemon refuses (port 0,
   decimal keepalive, names over 128 bytes).
-- `set_password` without a password argument is an error instead of
-  deleting the stored password.
 - No more `Unknown Model`, `Unknown Platform` and `Unknown Version`
   placeholders; mwan3 zeros (no quality checks, no state), an empty package
   index and a stopped service are reported as what they are.
@@ -113,7 +110,7 @@ Found by the independent review of the same commit:
   the availability topic is cleared when the base topic or node changes while
   the service is stopped.
 - LuCI: the identity warning survives a save; the Broker page says when it
-  cannot know the password or TLS state; the password field is not filled by
+  cannot know the TLS state; the password field is not filled by
   password managers; failed calls show their message.
 - Tools: the browser scripts no longer print the router password in
   errors; `tools/e2e-smoke.sh` runs the daemon against a fake broker and
@@ -129,3 +126,13 @@ Found by the independent review of the same commit:
   switch.
 - The package declares `libgcc` and `ca-bundle`, which the binary and the
   default TLS settings need.
+
+### Password in UCI (mqtt-metrics r9, luci-app-mqtt-metrics r8)
+
+- The broker password is an ordinary option, `broker.password` in
+  `/etc/config/mqtt-metrics`, edited on the Broker page like any other
+  OpenWrt password (ADR-0008). The upgrade moves a password from
+  `/etc/mqtt-metrics/secret` into UCI once and removes the file.
+- Gone with it: the rpcd method `set_password`, the "Remove stored password"
+  switch and the special handling of the stored password in the connection
+  test, which now uses the password in the form.
