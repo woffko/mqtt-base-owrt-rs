@@ -400,10 +400,15 @@ fn test_connection(args: &Value) -> Value {
         .and_then(Value::as_bool)
         .unwrap_or(cfg.broker.tls.enabled);
     // The password from the form, empty for none; without the argument (the
-    // Status page) the saved one.
+    // Status page) the saved one, but only for the saved broker: the caller
+    // may point the test at any host and port and drop TLS, and the saved
+    // password must never travel to a broker the owner did not configure.
+    let saved_target =
+        host == cfg.broker.host && port == cfg.broker.port && (tls_on || !cfg.broker.tls.enabled);
     let password = match args.get("password") {
         Some(p) => p.as_str().filter(|s| !s.is_empty()).map(str::to_string),
-        None => cfg.broker.password.as_ref().map(|p| p.expose().to_string()),
+        None if saved_target => cfg.broker.password.as_ref().map(|p| p.expose().to_string()),
+        None => None,
     };
     let tls = tls_on.then(|| {
         let mut broker = cfg.broker.clone();
