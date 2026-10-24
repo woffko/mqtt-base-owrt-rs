@@ -136,3 +136,11 @@ Found by the independent review of the same commit:
 - Gone with it: the rpcd method `set_password`, the "Remove stored password"
   switch and the special handling of the stored password in the connection
   test, which now uses the password in the form.
+
+### Security fixes of 2026-10-22 (mqtt-metrics r10)
+
+- `rustls` 0.23.46 and `rustls-webpki` 0.103.16 (RUSTSEC-2026-0382: the old
+  `rustls-webpki` could accept distrusted intermediate certificates;
+  RUSTSEC-2026-0346 to 0349 in `rustls` 0.23.45). `cargo audit` is clean.
+- The connection test sends the saved password only to the saved broker,
+  port and TLS setting; a password typed in the form is sent as given.

@@ -23,7 +23,10 @@ sent to another host (a defect the audit of 2026-09-29 found).
 - The password is `broker.password` in `/etc/config/mqtt-metrics`. The file
   stays mode 0600; the init script enforces it.
 - LuCI shows it in a concealed password field; the connection test sends the
-  password in the form.
+  password in the form. Called without a password (the Status page), the
+  test uses the saved one, and only for the saved host, port and TLS setting
+  (amended 2026-10-22, CA-MQTT-01): a caller must not be able to send the
+  saved password to another broker or without TLS.
 - The daemon keeps it in a type whose debug output is `<set>`. It never
   appears in the log, `status.json`, the rpcd `status`, `catalog` and
   `preview` replies, or a configuration error message.
@@ -33,8 +36,9 @@ sent to another host (a defect the audit of 2026-09-29 found).
 
 ## Consequences
 
-- The rpcd method `set_password`, the secret file, its keep.d entry and the
-  stored-password logic of the connection test are gone.
+- The rpcd method `set_password`, the secret file and its keep.d entry are
+  gone; the connection test keeps only the rule above for the saved
+  password.
 - A backup of `/etc/config` contains the password, as it does for every other
   OpenWrt password.
 - `mosquitto_sub` still takes a password only as an argument, so the

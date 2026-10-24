@@ -381,6 +381,21 @@ fn arg_str(args: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The password for a connection test: the one in the form, empty for none.
+/// Without the argument (the Status page) the saved one, but only for the
+/// saved broker: the caller may point the test at any host and port and drop
+/// TLS, and the saved password must never travel to a broker the owner did
+/// not configure.
+fn test_password(args: &Value, cfg: &Config, host: &str, port: u16, tls: bool) -> Option<String> {
+    let saved_target =
+        host == cfg.broker.host && port == cfg.broker.port && (tls || !cfg.broker.tls.enabled);
+    match args.get("password") {
+        Some(p) => p.as_str().filter(|s| !s.is_empty()).map(str::to_string),
+        None if saved_target => cfg.broker.password.as_ref().map(|p| p.expose().to_string()),
+        None => None,
+    }
+}
+
 fn test_connection(args: &Value) -> Value {
     let (cfg, _) = load_config(&SystemSource);
     let host = arg_str(args, "host").unwrap_or_else(|| cfg.broker.host.clone());
@@ -399,17 +414,7 @@ fn test_connection(args: &Value) -> Value {
         .get("tls")
         .and_then(Value::as_bool)
         .unwrap_or(cfg.broker.tls.enabled);
-    // The password from the form, empty for none; without the argument (the
-    // Status page) the saved one, but only for the saved broker: the caller
-    // may point the test at any host and port and drop TLS, and the saved
-    // password must never travel to a broker the owner did not configure.
-    let saved_target =
-        host == cfg.broker.host && port == cfg.broker.port && (tls_on || !cfg.broker.tls.enabled);
-    let password = match args.get("password") {
-        Some(p) => p.as_str().filter(|s| !s.is_empty()).map(str::to_string),
-        None if saved_target => cfg.broker.password.as_ref().map(|p| p.expose().to_string()),
-        None => None,
-    };
+    let password = test_password(args, &cfg, &host, port, tls_on);
     let tls = tls_on.then(|| {
         let mut broker = cfg.broker.clone();
         broker.tls.enabled = true;
@@ -570,6 +575,49 @@ mod tests {
         assert_eq!(template_title("{P} {n} Status"), "Status");
         assert_eq!(template_title("MWAN3 {n} {m} Latency"), "MWAN3 Latency");
         assert_eq!(template_title("Uptime"), "Uptime");
+    }
+
+    #[test]
+    fn the_saved_password_goes_only_to_the_saved_broker() {
+        let mut cfg = Config::default();
+        cfg.broker.host = "broker.example".into();
+        cfg.broker.tls.enabled = true;
+        cfg.broker.password = Some(config::Secret::new("saved".into()));
+        let none = json!({});
+        let saved = Some("saved".to_string());
+        assert_eq!(
+            test_password(&none, &cfg, "broker.example", 1883, true),
+            saved
+        );
+        // Another host, another port, or TLS dropped: nothing is sent.
+        assert_eq!(
+            test_password(&none, &cfg, "other.example", 1883, true),
+            None
+        );
+        assert_eq!(
+            test_password(&none, &cfg, "broker.example", 8883, true),
+            None
+        );
+        assert_eq!(
+            test_password(&none, &cfg, "broker.example", 1883, false),
+            None
+        );
+        // A password in the form is used as given; empty means none.
+        let typed = json!({ "password": "typed" });
+        assert_eq!(
+            test_password(&typed, &cfg, "other.example", 1883, false).as_deref(),
+            Some("typed")
+        );
+        assert_eq!(
+            test_password(
+                &json!({ "password": "" }),
+                &cfg,
+                "broker.example",
+                1883,
+                true
+            ),
+            None
+        );
     }
 
     #[test]
