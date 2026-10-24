@@ -36,7 +36,7 @@ else
 fi
 sh -n package/mqtt-metrics/files/etc/init.d/mqtt-metrics
 sh -n tools/e2e-smoke.sh
-python3 -m py_compile tools/sanitize-fixtures.py tools/gen-topics.py tools/e2e/e2e.py
+python3 -m py_compile tools/sanitize-fixtures.py tools/gen-topics.py tools/e2e/e2e.py tools/release-assets.py
 # The daemon against a fake broker and fake uci/ubus takes about a minute and
 # a half: run it with E2E=1 before a deployment.
 if [ -n "${E2E:-}" ]; then
