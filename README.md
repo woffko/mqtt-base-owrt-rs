@@ -86,7 +86,6 @@ them:
 | Architecture | OpenWrt targets | Examples |
 | --- | --- | --- |
 | `x86_64` | x86/64 | PCs, mini PCs, virtual machines |
-| `i386_pentium4` | x86/generic | 32-bit PCs |
 | `aarch64_cortex-a53` | mediatek/filogic, mediatek/mt7622, qualcommax, bcm27xx/bcm2710 | GL.iNet GL-MT3000 and GL-MT6000, Banana Pi BPI-R3 and BPI-R4, Qualcomm IPQ807x and IPQ60xx routers, Raspberry Pi 3 |
 | `aarch64_cortex-a72` | bcm27xx/bcm2711, mvebu/cortexa72 | Raspberry Pi 4 and CM4, Marvell Armada 8040 boards |
 | `aarch64_cortex-a76` | bcm27xx/bcm2712 | Raspberry Pi 5 |
@@ -98,6 +97,9 @@ them:
 | `arm_cortex-a15_neon-vfpv4` | ipq806x, armsr/armv7 | Netgear R7800, TP-Link Archer C2600 |
 | `mips_24kc` | ath79 | TP-Link Archer C7 and other Atheros/QCA routers |
 | `mipsel_24kc` | ramips/mt7621, ramips/mt76x8 | Ubiquiti EdgeRouter X, Xiaomi Mi Router 4A Gigabit and other MT7621 and MT76x8 routers |
+
+There is no package for 32-bit x86 (`i386_*`): OpenWrt builds Rust for
+`i586`, which has no SSE2, and the TLS library (`ring`) requires SSE2.
 
 ## Build
 

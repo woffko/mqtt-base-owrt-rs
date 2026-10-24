@@ -25,10 +25,10 @@ MAKE_JOBS=${MAKE_JOBS:-16}
 BASE=https://downloads.openwrt.org/releases/$OPENWRT/targets
 
 # Package architecture and the SDK target that provides it. One package
-# covers every device of that architecture.
+# covers every device of that architecture. 32-bit x86 is missing: OpenWrt
+# builds Rust for i586, without SSE2, which ring (TLS) requires.
 TABLE='
 x86_64 x86/64
-i386_pentium4 x86/generic
 aarch64_generic rockchip/armv8
 aarch64_cortex-a53 mediatek/filogic
 aarch64_cortex-a72 bcm27xx/bcm2711

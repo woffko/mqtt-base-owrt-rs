@@ -27,7 +27,6 @@ REPO = Path(__file__).resolve().parent.parent
 # ELF machine and class (bits) per package architecture prefix.
 ELF = {
     'x86_64': ('Advanced Micro Devices X86-64', 64),
-    'i386': ('Intel 80386', 32),
     'aarch64': ('AArch64', 64),
     'arm_': ('ARM', 32),
     'mips_': ('MIPS R3000', 32),
