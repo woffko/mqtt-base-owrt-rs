@@ -31,11 +31,14 @@ const FIXTURES = REPO + '/tests/fixtures/primary';
 const ORIGIN = 'http://openwrt.lan';
 
 const HOST = 'router';
-// Strings that must not appear in a picture: names of the real setup and of
-// the test fixtures, private address ranges, anything that looks like a
-// router address of the test equipment.
+// Strings that must not appear in a picture: names of the test fixtures, the
+// address ranges of the test equipment and home networks. Personal words
+// (host names, user names) go into the file named by $DOCS_FORBIDDEN, one
+// regular expression per line, which stays out of the repository.
 const FORBIDDEN = [ /router-primary/, /router-secondary/, /QEMU/i, /wifi87/, /bond0/, /\bsync\b/,
-	/10\.0\.77\./, /w0wkin/i, /192\.168\./, /neuroguard/i, /owsync/, /lease-sync/ ];
+	/10\.0\.77\./, /192\.168\./, /owsync/, /lease-sync/ ].concat(
+	process.env.DOCS_FORBIDDEN ? fs.readFileSync(process.env.DOCS_FORBIDDEN, 'utf8').split('\n')
+		.map((l) => l.trim()).filter(Boolean).map((l) => new RegExp(l, 'i')) : []);
 
 // --- anonymous data -----------------------------------------------------
 
