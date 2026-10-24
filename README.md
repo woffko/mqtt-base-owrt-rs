@@ -122,6 +122,8 @@ which takes a while):
 
 ```sh
 tools/release-build.sh /path/to/work-dir   # packages land in work-dir/out/<arch>/
+tools/release-qemu.sh /path/to/work-dir    # each daemon under qemu-user against the host build
+tools/release-assets.py /path/to/work-dir /path/to/assets   # release names, checks, SHA256SUMS
 ```
 
 Or add the feed from `feeds.conf.example` to an OpenWrt tree and run
