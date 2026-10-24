@@ -11,7 +11,7 @@ This repository provides an OpenWrt 25.12 package feed with:
   application that configures the daemon and selects or hides published
   metrics.
 
-The repository name is `mqtt-base-owrt-rs` (private on GitHub for now).
+The repository name is `mqtt-base-owrt-rs` (public on GitHub).
 
 The project was built from the work plan `docs/plan/PLAN.md`, which is kept
 as history together with `docs/evidence/`; record new decisions and
