@@ -1,8 +1,21 @@
 # Release notes
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-25)
 
 First version of `mqtt-metrics` and `luci-app-mqtt-metrics` for OpenWrt 25.12.
+
+### Packages
+
+- `mqtt-metrics` 0.1.0-r10 for twelve package architectures: `x86_64`,
+  `aarch64_generic`, `aarch64_cortex-a53`, `aarch64_cortex-a72`,
+  `aarch64_cortex-a76`, `arm_cortex-a7`, `arm_cortex-a7_neon-vfpv4`,
+  `arm_cortex-a9`, `arm_cortex-a9_vfpv3-d16`, `arm_cortex-a15_neon-vfpv4`,
+  `mips_24kc` and `mipsel_24kc`; `luci-app-mqtt-metrics` 0.1.0-r8 for all of
+  them. Built with the official OpenWrt 25.12.6 SDKs.
+- Every daemon ran under qemu-user on captured router data and gave the same
+  output as the host build (`tools/release-qemu.sh`).
+- There is no package for 32-bit x86: OpenWrt builds Rust for `i586`, which
+  has no SSE2, and the TLS library `ring` requires SSE2.
 
 ### Defaults
 
