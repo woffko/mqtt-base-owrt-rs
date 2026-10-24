@@ -8,7 +8,13 @@ After installation the service runs but stays idle until a broker host is
 set. It then publishes the default set every 300 seconds: the system
 identity and uptime, and the state and addresses of the WAN interfaces.
 
+The pages work on phones as well; LuCI's Bootstrap theme switches to a
+one-column layout. Installation is described in the
+[README](../README.md#install).
+
 ## Status
+
+![The Status page](screenshots/status.png)
 
 Shows the connection (state, broker, last connect, last publish, message and
 error counters, last error), the device identity (device id and name, base
@@ -22,6 +28,8 @@ of everything currently published with its last value, topic and time.
 The page refreshes every 5 seconds.
 
 ## Broker
+
+![The Broker page](screenshots/broker.png)
 
 | Field | Notes |
 | --- | --- |
@@ -38,6 +46,8 @@ The page refreshes every 5 seconds.
 so settings can be checked before saving.
 
 ## Topics and device
+
+![The Topics and device page](screenshots/topics.png)
 
 | Field | Default | Notes |
 | --- | --- | --- |
@@ -60,6 +70,8 @@ discovery prefix. The Topics page shows a warning as soon as one of these
 fields changes, and the old retained topics are removed automatically.
 
 ## Metrics
+
+![The Metrics page: publishing, selection and the first group](screenshots/metrics.png)
 
 ### Publishing
 
@@ -95,6 +107,8 @@ Metrics of newly selected instances appear after **Save & Apply**.
 
 ### Groups and metrics
 
+![A metric opened with its details and discovery preview](screenshots/metrics-details.png)
+
 Each group (System, Network interfaces, Traffic, Multi-WAN, HA cluster,
 DHCP, WireGuard, Wi-Fi, Services, Packages) can be collapsed and has:
 
@@ -121,6 +135,8 @@ group setting and selection. **Filter** and **Only published** narrow the
 list. Nothing changes on the router until **Save & Apply**.
 
 ## Diagnostics
+
+![The Diagnostics page](screenshots/diagnostics.png)
 
 - **Actions**: reload configuration, republish discovery and states, and
   **Reset retained topics**, which clears every retained topic this router
